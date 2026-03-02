@@ -196,6 +196,70 @@ chmod +x setup.sh && ./setup.sh
 
 > 💡 **提示**：一键配置完成后，请重启 Claude Code CLI 使配置生效。
 
+### 🎛️ 使用 CC Switch 配置（图形化界面）
+
+[CC Switch](https://github.com/farion1231/cc-switch) 是一款跨平台桌面工具，提供统一的图形化界面来管理 Claude Code、Codex、OpenCode 及 Gemini CLI，无需手动编辑配置文件。
+
+#### 安装 CC Switch
+
+| 平台 | 安装方式 |
+|:-----|:---------|
+| **Windows** | 下载 `.msi` 安装包或便携版 ZIP（从 Releases 页面） |
+| **macOS** | 从 [Releases](https://github.com/farion1231/cc-switch/releases) 下载 `.zip` 文件解压安装，或 `brew tap farion1231/ccswitch && brew install --cask cc-switch` |
+| **Linux** | 下载 `.AppImage` 文件，添加执行权限后运行 |
+
+#### 在 CC Switch 中配置 CCG
+
+**1. 添加 MCP 服务器**
+
+- 打开 CC Switch，点击"MCP"按钮进入 MCP 管理面板
+- 点击"添加服务器"，选择"自定义配置"
+- 填写以下信息：
+  - **服务器名称**：`ccg`
+  - **Command**：`uvx`
+  - **Args**：
+    ```
+    --refresh
+    --from
+    git+https://github.com/isYangs/Coder-Codex-Gemini.git
+    ccg-mcp
+    ```
+  - **Transport**：`stdio`
+- 勾选需要使用 CCG 的应用（Claude Code、Codex、OpenCode、Gemini CLI）
+- 点击保存，CC Switch 会自动同步配置到选中的应用
+
+**2. 配置 Coder 后端 API**
+
+CCG 的 Coder 工具需要配置后端模型 API。请参考前面的"配置 Coder"章节，手动创建 `~/.ccg-mcp/config.toml` 文件并填写 API Token、Base URL 和 Model。
+
+> 💡 **说明**：CC Switch 目前不直接管理 CCG 的 Coder 配置，需要手动配置。
+
+**3. 安装 Skills（可选）**
+
+- 方式一：在 CC Switch 的 Skills 管理器中，添加本项目的 GitHub 仓库 `https://github.com/isYangs/Coder-Codex-Gemini.git`，选择 `skills/ccg-workflow` 和 `skills/gemini-collaboration` 进行安装
+- 方式二：手动复制本项目的 `skills/` 目录到 `~/.claude/skills/`
+
+**4. 配置全局 Prompt（推荐）**
+
+- 在 CC Switch 的 Prompts 管理器中创建新预设
+- 将本项目 `templates/ccg-global-prompt.md` 的内容复制到预设中
+- 激活该预设，CC Switch 会自动同步到 `~/.claude/CLAUDE.md`
+
+**5. 验证配置**
+
+重启 Claude Code CLI，运行 `claude mcp list` 检查 CCG 是否已连接。
+
+#### 核心优势
+
+| 特性 | 说明 |
+|:-----|:-----|
+| 🖥️ **可视化界面** | 无需手动编辑配置文件，操作直观友好 |
+| 🔄 **双向同步** | 配置变更自动同步至多个 AI 工具 |
+| 📦 **一键安装** | MCP 服务器、Skills、Prompt 全自动部署 |
+| ☁️ **云端备份** | 支持配置导出/导入和云端同步 |
+
+> 💡 **提示**：CC Switch 是由社区开发的第三方工具，与本项目独立。遇到问题请在 [CC Switch 仓库](https://github.com/farion1231/cc-switch) 提交 Issue。
+
 ### Windows 用户注意事项
 
 在 Windows 上使用 CCG-MCP，请确保以下 CLI 工具已正确添加到系统 PATH：

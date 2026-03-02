@@ -196,6 +196,70 @@ chmod +x setup.sh && ./setup.sh
 
 > 💡 **Tip**: After one-click setup completes, restart Claude Code CLI for changes to take effect.
 
+### 🎛️ Configure with CC Switch (GUI)
+
+[CC Switch](https://github.com/farion1231/cc-switch) is a cross-platform desktop tool that provides a unified graphical interface to manage Claude Code, Codex, OpenCode & Gemini CLI, eliminating the need for manual configuration file editing.
+
+#### Install CC Switch
+
+| Platform | Installation Method |
+|:---------|:-------------------|
+| **Windows** | Download `.msi` installer or portable ZIP from Releases |
+| **macOS** | Download `.zip` from [Releases](https://github.com/farion1231/cc-switch/releases) and extract, or `brew tap farion1231/ccswitch && brew install --cask cc-switch` |
+| **Linux** | Download `.AppImage` file, add execute permission, and run |
+
+#### Configure CCG in CC Switch
+
+**1. Add MCP Server**
+
+- Open CC Switch, click "MCP" button to enter MCP management panel
+- Click "Add Server", select "Custom Configuration"
+- Fill in the following information:
+  - **Server Name**: `ccg`
+  - **Command**: `uvx`
+  - **Args**:
+    ```
+    --refresh
+    --from
+    git+https://github.com/isYangs/Coder-Codex-Gemini.git
+    ccg-mcp
+    ```
+  - **Transport**: `stdio`
+- Check the apps you want to use CCG with (Claude Code, Codex, OpenCode, Gemini CLI)
+- Click save, CC Switch will automatically sync the configuration to selected apps
+
+**2. Configure Coder Backend API**
+
+CCG's Coder tool requires backend model API configuration. Please refer to the "Configure Coder" section above, manually create `~/.ccg-mcp/config.toml` file and fill in API Token, Base URL, and Model.
+
+> 💡 **Note**: CC Switch does not directly manage CCG's Coder configuration, manual setup is required.
+
+**3. Install Skills (Optional)**
+
+- Method 1: In CC Switch's Skills Manager, add this project's GitHub repository `https://github.com/isYangs/Coder-Codex-Gemini.git`, select `skills/ccg-workflow` and `skills/gemini-collaboration` to install
+- Method 2: Manually copy the `skills/` directory from this project to `~/.claude/skills/`
+
+**4. Configure Global Prompts (Recommended)**
+
+- Create a new preset in CC Switch's Prompts Manager
+- Copy the content from `templates/ccg-global-prompt.md` into the preset
+- Activate the preset, CC Switch will automatically sync to `~/.claude/CLAUDE.md`
+
+**5. Verify Configuration**
+
+Restart Claude Code CLI, run `claude mcp list` to check if CCG is connected.
+
+#### Key Advantages
+
+| Feature | Description |
+|:--------|:------------|
+| 🖥️ **Visual Interface** | No manual configuration file editing, intuitive and user-friendly |
+| 🔄 **Bidirectional Sync** | Configuration changes automatically sync across multiple AI tools |
+| 📦 **One-Click Installation** | MCP servers, Skills, and Prompts deploy automatically |
+| ☁️ **Cloud Backup** | Support configuration export/import and cloud synchronization |
+
+> 💡 **Tip**: CC Switch is a third-party tool developed by the community, independent of this project. For issues, please submit to [CC Switch Repository](https://github.com/farion1231/cc-switch).
+
 ### 2. Install MCP Server
 
 #### Remote Installation (Recommended)
