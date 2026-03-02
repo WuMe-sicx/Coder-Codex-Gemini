@@ -13,7 +13,7 @@ api_token = "your-api-token"
 # GLM 示例：
 base_url = "https://open.bigmodel.cn/api/anthropic"
 
-# 模型名称（可选，默认 glm-4.7）
+# 模型名称（必填）
 model = "glm-4.7"
 
 # 额外环境变量（建议保留）
