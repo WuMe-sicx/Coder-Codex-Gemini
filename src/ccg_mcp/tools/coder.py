@@ -290,24 +290,21 @@ def run_coder_command(
 
     exit_code: Optional[int] = None
     try:
-        exit_code = process.wait(timeout=5)  # 此时进程应已结束，短超时即可
+        exit_code = process.wait(timeout=15)
     except subprocess.TimeoutExpired:
+        # 输出已完整获取，进程只是退出慢（Windows 常见）
+        # 静默终止进程，不视为致命错误
         process.terminate()
         try:
-            process.wait(timeout=2)
+            process.wait(timeout=5)
         except subprocess.TimeoutExpired:
             process.kill()
-            process.wait()
-        # 进程等待超时（罕见情况），视为总时长超时
-        timeout_error = CommandTimeoutError(
-            f"coder 进程等待超时，进程已终止。",
-            is_idle=False
-        )
+            try:
+                process.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                pass  # 极端情况：进程无法终止，放弃
     finally:
         thread.join(timeout=5)
-
-    if timeout_error is not None:
-        raise timeout_error
 
     # 读取剩余输出（不再累加 raw_output_lines，避免重复计数）
     while not output_queue.empty():
@@ -483,24 +480,22 @@ def safe_coder_command(
 
             exit_code: Optional[int] = None
             try:
-                exit_code = process.wait(timeout=5)
+                exit_code = process.wait(timeout=15)
             except subprocess.TimeoutExpired:
+                # 输出已完整获取，进程只是退出慢（Windows 常见）
+                # 静默终止进程，不视为致命错误
                 process.terminate()
                 try:
-                    process.wait(timeout=2)
+                    process.wait(timeout=5)
                 except subprocess.TimeoutExpired:
                     process.kill()
-                    process.wait()
-                timeout_error = CommandTimeoutError(
-                    f"coder 进程等待超时，进程已终止。",
-                    is_idle=False
-                )
+                    try:
+                        process.wait(timeout=3)
+                    except subprocess.TimeoutExpired:
+                        pass  # 极端情况：进程无法终止，放弃
             finally:
                 if thread is not None:
                     thread.join(timeout=5)
-
-            if timeout_error is not None:
-                raise timeout_error
 
             while not output_queue.empty():
                 try:
