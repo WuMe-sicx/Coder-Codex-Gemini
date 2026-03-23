@@ -321,15 +321,16 @@ def safe_codex_command(
     timeout: int = 300,
     max_duration: int = 1800,
     prompt: str = "",
-) -> Iterator[Generator[str, None, tuple[Optional[int], int]]]:
+) -> Iterator[tuple[Generator[str, None, None], Dict[str, Any]]]:
     """安全执行 Codex 命令的上下文管理器
 
-    确保在任何情况下（包括异常）都能正确清理子进程。
+    确保在任何情况下（包括异���）都能正确清理子进程。
 
     用法:
-        with safe_codex_command(cmd, timeout, max_duration, prompt) as gen:
+        with safe_codex_command(cmd, timeout, max_duration, prompt) as (gen, result_holder):
             for line in gen:
                 process_line(line)
+            exit_code = result_holder["exit_code"]
     """
     codex_path = shutil.which('codex')
     if not codex_path:
@@ -396,6 +397,7 @@ def safe_codex_command(
 
         output_queue: queue.Queue[str | None] = queue.Queue()
         raw_output_lines_holder = [0]
+        result_holder: Dict[str, Any] = {"exit_code": None, "raw_output_lines": 0}
         GRACEFUL_SHUTDOWN_DELAY = 0.3
 
         def is_turn_completed(line: str) -> bool:
@@ -427,7 +429,7 @@ def safe_codex_command(
         thread = threading.Thread(target=read_output, daemon=True)
         thread.start()
 
-        def generator() -> Generator[str, None, tuple[Optional[int], int]]:
+        def generator() -> Generator[str, None, None]:
             """生成器：读取输出并处理超时"""
             nonlocal thread
             start_time = time.time()
@@ -495,9 +497,10 @@ def safe_codex_command(
                 except queue.Empty:
                     break
 
-            return (exit_code, raw_output_lines_holder[0])
+            result_holder["exit_code"] = exit_code
+            result_holder["raw_output_lines"] = raw_output_lines_holder[0]
 
-        yield generator()
+        yield generator(), result_holder
 
     except Exception:
         cleanup()
@@ -719,80 +722,79 @@ async def codex_tool(
         last_lines: list[str] = []
 
         try:
-            with safe_codex_command(cmd, timeout=timeout, max_duration=max_duration, prompt=PROMPT) as gen:
-                try:
-                    for line in gen:
-                        last_lines.append(line)
-                        if len(last_lines) > 50:
-                            last_lines.pop(0)
+            with safe_codex_command(cmd, timeout=timeout, max_duration=max_duration, prompt=PROMPT) as (gen, result_holder):
+                for line in gen:
+                    last_lines.append(line)
+                    if len(last_lines) > 50:
+                        last_lines.pop(0)
 
-                        try:
-                            line_dict = json.loads(line.strip())
+                    try:
+                        line_dict = json.loads(line.strip())
 
-                            # 收集消息（脱敏 tool_result 内容）
-                            if return_all_messages:
-                                import copy
-                                safe_dict = copy.deepcopy(line_dict)
-                                item = safe_dict.get("item", {})
-                                # Codex 的 tool_result 在 item 中
-                                if item.get("type") == "tool_result":
-                                    # 只保留 tool_use_id 和 type，脱敏 content
-                                    if "content" in item:
-                                        item["content"] = "[truncated]"
-                                all_messages.append(safe_dict)
-                            else:
-                                # 即使不返回也需要解析，但不存储
-                                pass
+                        # 收集消息（脱敏 tool_result 内容）
+                        if return_all_messages:
+                            import copy
+                            safe_dict = copy.deepcopy(line_dict)
+                            item = safe_dict.get("item", {})
+                            # Codex 的 tool_result 在 item 中
+                            if item.get("type") == "tool_result":
+                                # 只保留 tool_use_id 和 type，脱敏 content
+                                if "content" in item:
+                                    item["content"] = "[truncated]"
+                            all_messages.append(safe_dict)
+                        else:
+                            # 即使不返回也需要解析，但不存储
+                            pass
 
-                            item = line_dict.get("item", {})
-                            item_type = item.get("type", "")
+                        item = line_dict.get("item", {})
+                        item_type = item.get("type", "")
 
-                            if item_type == "agent_message":
-                                agent_messages += item.get("text", "")
+                        if item_type == "agent_message":
+                            agent_messages += item.get("text", "")
 
-                            if line_dict.get("thread_id") is not None:
-                                thread_id = line_dict.get("thread_id")
+                        if line_dict.get("thread_id") is not None:
+                            thread_id = line_dict.get("thread_id")
 
-                            # 错误处理：记录错误但不立即判断成功与否
-                            # 注意：AUTH_REQUIRED 优先级最高，一旦设置不再被覆盖
-                            if "fail" in line_dict.get("type", ""):
+                        # 错误处理：记录错误但不立即判断成功与否
+                        # 注意：AUTH_REQUIRED 优先级最高，一旦设置不再被覆盖
+                        if "fail" in line_dict.get("type", ""):
+                            had_error = True
+                            fail_msg = line_dict.get("error", {}).get("message", "")
+                            err_message += "\n\n[codex error] " + fail_msg
+                            # 检测是否为认证错误（优先级高于 UPSTREAM_ERROR）
+                            if _is_auth_error(fail_msg):
+                                error_kind = ErrorKind.AUTH_REQUIRED
+                            elif error_kind != ErrorKind.AUTH_REQUIRED:
+                                error_kind = ErrorKind.UPSTREAM_ERROR
+
+                        if "error" in line_dict.get("type", ""):
+                            error_msg = line_dict.get("message", "")
+                            is_reconnecting = bool(re.match(r'^Reconnecting\.\.\.\s+\d+/\d+$', error_msg))
+
+                            if not is_reconnecting:
                                 had_error = True
-                                fail_msg = line_dict.get("error", {}).get("message", "")
-                                err_message += "\n\n[codex error] " + fail_msg
+                                err_message += "\n\n[codex error] " + error_msg
                                 # 检测是否为认证错误（优先级高于 UPSTREAM_ERROR）
-                                if _is_auth_error(fail_msg):
+                                if _is_auth_error(error_msg):
                                     error_kind = ErrorKind.AUTH_REQUIRED
                                 elif error_kind != ErrorKind.AUTH_REQUIRED:
                                     error_kind = ErrorKind.UPSTREAM_ERROR
 
-                            if "error" in line_dict.get("type", ""):
-                                error_msg = line_dict.get("message", "")
-                                is_reconnecting = bool(re.match(r'^Reconnecting\.\.\.\s+\d+/\d+$', error_msg))
+                    except json.JSONDecodeError:
+                        # JSON 解析失败记录但不影响成功判定
+                        json_decode_errors += 1
+                        err_message += "\n\n[json decode error] " + line
+                        continue
 
-                                if not is_reconnecting:
-                                    had_error = True
-                                    err_message += "\n\n[codex error] " + error_msg
-                                    # 检测是否为认证错误（优先级高于 UPSTREAM_ERROR）
-                                    if _is_auth_error(error_msg):
-                                        error_kind = ErrorKind.AUTH_REQUIRED
-                                    elif error_kind != ErrorKind.AUTH_REQUIRED:
-                                        error_kind = ErrorKind.UPSTREAM_ERROR
+                    except Exception as error:
+                        err_message += f"\n\n[unexpected error] {error}. Line: {line!r}"
+                        had_error = True
+                        error_kind = ErrorKind.UNEXPECTED_EXCEPTION
+                        break
 
-                        except json.JSONDecodeError:
-                            # JSON 解析失败记录但不影响成功判定
-                            json_decode_errors += 1
-                            err_message += "\n\n[json decode error] " + line
-                            continue
-
-                        except Exception as error:
-                            err_message += f"\n\n[unexpected error] {error}. Line: {line!r}"
-                            had_error = True
-                            error_kind = ErrorKind.UNEXPECTED_EXCEPTION
-                            break
-                except StopIteration as e:
-                    # 正确捕获生成器返回值
-                    if isinstance(e.value, tuple) and len(e.value) == 2:
-                        exit_code, raw_output_lines = e.value
+                # 从 result_holder 读取进程退出信息
+                exit_code = result_holder["exit_code"]
+                raw_output_lines = result_holder["raw_output_lines"]
 
         except CommandNotFoundError as e:
             metrics.finish(

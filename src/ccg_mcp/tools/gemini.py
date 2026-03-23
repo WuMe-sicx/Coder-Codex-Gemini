@@ -325,15 +325,16 @@ def safe_gemini_command(
     max_duration: int = 1800,
     prompt: str = "",
     cwd: Optional[Path] = None,
-) -> Iterator[Generator[str, None, tuple[Optional[int], int]]]:
+) -> Iterator[tuple[Generator[str, None, None], Dict[str, Any]]]:
     """安全执行 Gemini 命令的上下文管理器
 
     确保在任何情况下（包括异常）都能正确清理子进程。
 
     用法:
-        with safe_gemini_command(cmd, timeout, max_duration, prompt, cwd) as gen:
+        with safe_gemini_command(cmd, timeout, max_duration, prompt, cwd) as (gen, result_holder):
             for line in gen:
                 process_line(line)
+            exit_code = result_holder["exit_code"]
     """
     gemini_path = shutil.which('gemini')
     if not gemini_path:
@@ -401,6 +402,7 @@ def safe_gemini_command(
 
         output_queue: queue.Queue[str | None] = queue.Queue()
         raw_output_lines_holder = [0]
+        result_holder: Dict[str, Any] = {"exit_code": None, "raw_output_lines": 0}
         GRACEFUL_SHUTDOWN_DELAY = 0.3
 
         def is_turn_completed(line: str) -> bool:
@@ -432,7 +434,7 @@ def safe_gemini_command(
         thread = threading.Thread(target=read_output, daemon=True)
         thread.start()
 
-        def generator() -> Generator[str, None, tuple[Optional[int], int]]:
+        def generator() -> Generator[str, None, None]:
             """生成器：读取输出并处理超时"""
             nonlocal thread
             start_time = time.time()
@@ -500,9 +502,10 @@ def safe_gemini_command(
                 except queue.Empty:
                     break
 
-            return (exit_code, raw_output_lines_holder[0])
+            result_holder["exit_code"] = exit_code
+            result_holder["raw_output_lines"] = raw_output_lines_holder[0]
 
-        yield generator()
+        yield generator(), result_holder
 
     except Exception:
         cleanup()
@@ -720,83 +723,82 @@ async def gemini_tool(
         last_lines: list[str] = []
 
         try:
-            with safe_gemini_command(cmd, timeout=timeout, max_duration=max_duration, prompt=PROMPT, cwd=cd) as gen:
-                try:
-                    for line in gen:
-                        last_lines.append(line)
-                        if len(last_lines) > 50:
-                            last_lines.pop(0)
+            with safe_gemini_command(cmd, timeout=timeout, max_duration=max_duration, prompt=PROMPT, cwd=cd) as (gen, result_holder):
+                for line in gen:
+                    last_lines.append(line)
+                    if len(last_lines) > 50:
+                        last_lines.pop(0)
 
-                        try:
-                            line_dict = json.loads(line.strip())
+                    try:
+                        line_dict = json.loads(line.strip())
 
-                            # stream-json 事件类型: init, message, tool_use, tool_result, error, result
-                            # 参考: https://geminicli.com/docs/cli/headless/
-                            event_type = line_dict.get("type", "")
+                        # stream-json 事件类型: init, message, tool_use, tool_result, error, result
+                        # 参考: https://geminicli.com/docs/cli/headless/
+                        event_type = line_dict.get("type", "")
 
-                            # 收集消息（脱敏 tool_result 内容）
-                            if return_all_messages:
-                                import copy
-                                safe_dict = copy.deepcopy(line_dict)
-                                # Gemini 的 tool_result 是独立事件类型
-                                if event_type == "tool_result":
-                                    # 脱敏 content 字段
-                                    if "content" in safe_dict:
-                                        safe_dict["content"] = "[truncated]"
-                                all_messages.append(safe_dict)
+                        # 收集消息（脱敏 tool_result 内容）
+                        if return_all_messages:
+                            import copy
+                            safe_dict = copy.deepcopy(line_dict)
+                            # Gemini 的 tool_result 是独立事件类型
+                            if event_type == "tool_result":
+                                # 脱敏 content 字段
+                                if "content" in safe_dict:
+                                    safe_dict["content"] = "[truncated]"
+                            all_messages.append(safe_dict)
 
-                            # 提取 message 事件中的内容
-                            if event_type == "message":
-                                # message 事件包含 role 和 content
-                                role = line_dict.get("role", "")
-                                content = line_dict.get("content", "")
-                                if role == "assistant" and content:
-                                    agent_messages += content
+                        # 提取 message 事件中的内容
+                        if event_type == "message":
+                            # message 事件包含 role 和 content
+                            role = line_dict.get("role", "")
+                            content = line_dict.get("content", "")
+                            if role == "assistant" and content:
+                                agent_messages += content
 
-                            # 提取 result 事件（最终统计）
-                            if event_type == "result":
-                                # result 事件包含 response 和统计信息
-                                response = line_dict.get("response", "")
-                                if response:
-                                    # 如果 result 中有完整响应，使用它
-                                    if not agent_messages:
-                                        agent_messages = response
+                        # 提取 result 事件（最终统计）
+                        if event_type == "result":
+                            # result 事件包含 response 和统计信息
+                            response = line_dict.get("response", "")
+                            if response:
+                                # 如果 result 中有完整响应，使用它
+                                if not agent_messages:
+                                    agent_messages = response
 
-                            # 提取 session_id (Gemini 可能在 init 事件中返回)
-                            if event_type == "init":
-                                if line_dict.get("session_id") is not None:
-                                    session_id = line_dict.get("session_id")
-                                if line_dict.get("thread_id") is not None:
-                                    session_id = line_dict.get("thread_id")
+                        # 提取 session_id (Gemini 可能在 init 事件中返回)
+                        if event_type == "init":
+                            if line_dict.get("session_id") is not None:
+                                session_id = line_dict.get("session_id")
+                            if line_dict.get("thread_id") is not None:
+                                session_id = line_dict.get("thread_id")
 
-                            # 错误处理
-                            # 注意：AUTH_REQUIRED 优先级最高，一旦设置不再被覆盖
-                            if event_type == "error":
-                                had_error = True
-                                error_msg = line_dict.get("message", str(line_dict))
-                                err_message += "\n\n[gemini error] " + error_msg
-                                # 检查是否为认证错误（优先级高于 UPSTREAM_ERROR）
-                                if _is_auth_error(error_msg):
-                                    error_kind = ErrorKind.AUTH_REQUIRED
-                                elif error_kind != ErrorKind.AUTH_REQUIRED:
-                                    error_kind = ErrorKind.UPSTREAM_ERROR
-
-                        except json.JSONDecodeError:
-                            # JSON 解析失败，记录错误计数
-                            json_decode_errors += 1
-                            # 非 JSON 输出记录到日志但不作为响应内容
-                            # 避免将 CLI 警告/错误文本误认为成功结果
-                            continue
-
-                        except Exception as error:
-                            err_message += f"\n\n[unexpected error] {error}. Line: {line!r}"
+                        # 错误处理
+                        # 注意：AUTH_REQUIRED 优先级最高，一旦设置不再被覆盖
+                        if event_type == "error":
                             had_error = True
-                            error_kind = ErrorKind.UNEXPECTED_EXCEPTION
-                            break
-                except StopIteration as e:
-                    # 正确捕获生成器返回值
-                    if isinstance(e.value, tuple) and len(e.value) == 2:
-                        exit_code, raw_output_lines = e.value
+                            error_msg = line_dict.get("message", str(line_dict))
+                            err_message += "\n\n[gemini error] " + error_msg
+                            # 检查是否为认证错误（优先级高于 UPSTREAM_ERROR）
+                            if _is_auth_error(error_msg):
+                                error_kind = ErrorKind.AUTH_REQUIRED
+                            elif error_kind != ErrorKind.AUTH_REQUIRED:
+                                error_kind = ErrorKind.UPSTREAM_ERROR
+
+                    except json.JSONDecodeError:
+                        # JSON 解析失败，记录错误计数
+                        json_decode_errors += 1
+                        # 非 JSON 输出记录到日志但不作为响应内容
+                        # 避免将 CLI 警告/错误文本误认为成功结果
+                        continue
+
+                    except Exception as error:
+                        err_message += f"\n\n[unexpected error] {error}. Line: {line!r}"
+                        had_error = True
+                        error_kind = ErrorKind.UNEXPECTED_EXCEPTION
+                        break
+
+                # 从 result_holder 读取进程退出信息
+                exit_code = result_holder["exit_code"]
+                raw_output_lines = result_holder["raw_output_lines"]
 
         except CommandNotFoundError as e:
             metrics.finish(
