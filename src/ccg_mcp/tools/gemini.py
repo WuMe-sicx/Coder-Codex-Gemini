@@ -20,7 +20,7 @@ from typing import Annotated, Any, Dict, Generator, Iterator, List, Literal, Opt
 
 from pydantic import Field
 
-from ccg_mcp.config import build_gemini_env, load_config, ConfigError
+from ccg_mcp.config import build_gemini_env
 
 
 # ============================================================================
@@ -676,14 +676,8 @@ async def gemini_tool(
     # gemini CLI 命令格式: gemini [options]
     # 使用 -y/--yolo 跳过确认，--sandbox 启用沙箱
     # 参考: https://geminicli.com/docs/cli/headless/
-    # 构建环境变量（注入 GEMINI_API_KEY）
-    try:
-        config = load_config()
-    except (ConfigError, FileNotFoundError):
-        # load_config() 在 coder 未配置时抛 ConfigError，
-        # 但 gemini 可独立使用，静默回退
-        config = {}
-    gemini_env = build_gemini_env(config)
+    # 构建环境变量（Gemini CLI 自行从 ~/.gemini/.env 读取 API Key）
+    gemini_env = build_gemini_env({})
 
     cmd = ["gemini"]
 

@@ -129,11 +129,46 @@ def build_coder_env(config: dict[str, Any]) -> dict[str, str]:
     return env
 
 
+def _load_gemini_dotenv() -> dict[str, str]:
+    """从 ~/.gemini/.env 读取环境变量
+
+    Gemini CLI 的原生配置位置，格式为 KEY=VALUE（支持 # 注释和引号）。
+    主动读取并注入到子进程环境，确保不依赖父进程（VSCode）的环境快照。
+
+    Returns:
+        解析出的环境变量字典
+    """
+    env_path = Path.home() / ".gemini" / ".env"
+    if not env_path.exists():
+        return {}
+
+    result: dict[str, str] = {}
+    try:
+        for line in env_path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            key = key.strip()
+            value = value.strip()
+            # 去除可选的引号包裹
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in ('"', "'"):
+                value = value[1:-1]
+            if key:
+                result[key] = value
+    except (OSError, UnicodeDecodeError):
+        pass
+
+    return result
+
+
 def build_gemini_env(config: dict[str, Any]) -> dict[str, str]:
     """构建 Gemini 调用所需的环境变量
 
-    Gemini CLI 原生读取 ~/.gemini/.env 中的 GEMINI_API_KEY，
-    无需通过 config.toml 中转。此函数仅传递当前环境的副本。
+    主动从 ~/.gemini/.env 读取 GEMINI_API_KEY 等变量并注入子进程环境，
+    不依赖父进程（VSCode/Claude Code）的环境快照。
 
     Args:
         config: 配置字典（保留参数签名，供未来扩展）
@@ -141,7 +176,14 @@ def build_gemini_env(config: dict[str, Any]) -> dict[str, str]:
     Returns:
         包含所有环境变量的字典
     """
-    return os.environ.copy()
+    env = os.environ.copy()
+
+    # 从 ~/.gemini/.env 读取并注入（不覆盖已有值）
+    for key, value in _load_gemini_dotenv().items():
+        if key not in env:
+            env[key] = value
+
+    return env
 
 
 def build_coder_settings_json(config: dict[str, Any]) -> str:
