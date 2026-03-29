@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import os
+import sys
 import tomllib
 from pathlib import Path
 from typing import Any
@@ -132,8 +133,41 @@ def build_coder_env(config: dict[str, Any]) -> dict[str, str]:
 _GEMINI_ENV_KEYS = {"GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_GEMINI_BASE_URL"}
 
 
+def _gemini_env_candidates() -> list[Path]:
+    """返回 ~/.gemini/.env 的候选路径列表（去重，保序）"""
+    # 显式 override
+    override = (os.environ.get("CCG_GEMINI_ENV_FILE") or "").strip()
+    if override:
+        return [Path(override).expanduser()]
+
+    seen: set[str] = set()
+    candidates: list[Path] = []
+
+    def _add(base: str | None) -> None:
+        if not base:
+            return
+        p = Path(base) / ".gemini" / ".env"
+        key = str(p).lower()
+        if key not in seen:
+            seen.add(key)
+            candidates.append(p)
+
+    _add(os.environ.get("HOME"))
+    _add(os.environ.get("USERPROFILE"))
+    homedrive = os.environ.get("HOMEDRIVE", "")
+    homepath = os.environ.get("HOMEPATH", "")
+    if homedrive and homepath:
+        _add(homedrive + homepath)
+    try:
+        _add(str(Path.home()))
+    except Exception:
+        pass
+
+    return candidates
+
+
 def _load_gemini_dotenv() -> dict[str, str]:
-    """从 ~/.gemini/.env 读取环境变量
+    """从候选路径读取 ~/.gemini/.env，返回第一个成功解析的结果。
 
     Gemini CLI 的原生配置位置，格式为 KEY=VALUE（支持 # 注释和引号）。
     主动读取并注入到子进程环境，确保不依赖父进程（VSCode）的环境快照。
@@ -141,37 +175,48 @@ def _load_gemini_dotenv() -> dict[str, str]:
     Returns:
         解析出的环境变量字典
     """
-    env_path = Path.home() / ".gemini" / ".env"
-    if not env_path.exists():
-        return {}
-
     result: dict[str, str] = {}
-    try:
-        content = env_path.read_text(encoding="utf-8-sig")  # utf-8-sig 自动去除 BOM
-        for line in content.splitlines():
-            line = line.strip()
-            if not line or line.startswith("#"):
-                continue
-            # 去掉 export 前缀
-            if line.startswith("export "):
-                line = line[7:].lstrip()
-            if "=" not in line:
-                continue
-            key, _, value = line.partition("=")
-            key = key.strip()
-            value = value.strip()
-            # 去除可选的引号包裹（引号内的 # 保留）
-            if len(value) >= 2 and value[0] == value[-1] and value[0] in ('"', "'"):
-                value = value[1:-1]
-            else:
-                # 无引号包裹时，去除行尾注释
-                hash_pos = value.find("#")
-                if hash_pos != -1:
-                    value = value[:hash_pos].rstrip()
-            if key:
-                result[key] = value
-    except (OSError, UnicodeDecodeError):
-        pass
+    errors: list[str] = []
+    checked: list[str] = []
+
+    for env_path in _gemini_env_candidates():
+        checked.append(str(env_path))
+        if not env_path.exists():
+            continue
+        try:
+            content = env_path.read_text(encoding="utf-8-sig")  # utf-8-sig 自动去除 BOM
+            for line in content.splitlines():
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                # 去掉 export 前缀
+                if line.startswith("export "):
+                    line = line[7:].lstrip()
+                if "=" not in line:
+                    continue
+                key, _, value = line.partition("=")
+                key = key.strip()
+                value = value.strip()
+                # 去除可选的引号包裹（引号内的 # 保留）
+                if len(value) >= 2 and value[0] == value[-1] and value[0] in ('"', "'"):
+                    value = value[1:-1]
+                else:
+                    # 无引号包裹时，去除行尾注释
+                    hash_pos = value.find("#")
+                    if hash_pos != -1:
+                        value = value[:hash_pos].rstrip()
+                if key:
+                    result[key] = value
+            if result.keys() & _GEMINI_ENV_KEYS:
+                break  # 包含有效白名单键，使用此文件
+        except (OSError, UnicodeDecodeError) as e:
+            errors.append(f"{env_path}: {e.__class__.__name__}: {e}")
+
+    if errors and not result:
+        print(
+            f"[ccg-mcp] Gemini env load failed. checked={checked}; errors={errors}",
+            file=sys.stderr,
+        )
 
     return result
 
@@ -186,11 +231,18 @@ def build_gemini_env() -> dict[str, str]:
         包含所有环境变量的字典
     """
     env = os.environ.copy()
+    checked: list[str] = [str(p) for p in _gemini_env_candidates()]
 
     # 从 ~/.gemini/.env 强制覆盖白名单键（不检查是否已存在）
     for key, value in _load_gemini_dotenv().items():
         if key in _GEMINI_ENV_KEYS:
             env[key] = value
+
+    if not env.get("GEMINI_API_KEY") and not env.get("GOOGLE_API_KEY"):
+        print(
+            f"[ccg-mcp] Gemini API key missing after env assembly. checked={checked}",
+            file=sys.stderr,
+        )
 
     return env
 
