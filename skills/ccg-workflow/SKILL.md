@@ -6,13 +6,13 @@ description: |
   协调 Coder 执行代码/文档改动，Codex 审核代码质量。
 ---
 
-# CCG 协作流程
+# CCG 工作流协作流程
 
 ## 角色分工
 
-- **Claude**：规划者 + 快检者 + 最终决策者（**严禁直接修改代码/文档**）
-- **Coder**：执行者（代码/文档改动）
-- **Codex**：审核者 + 高级代码顾问（**每次 Coder 完成后必须审核**）
+- **Claude**：项目规划者 + 快检者 + 最终决策者（**禁止直接修改或改动代码/文档**）
+- **Coder**：项目执行者（代码/文档改动）
+- **Codex**：项目审核者 + 高级代码顾问（**每次 Coder 完成后必须审核**）
 - **Gemini**：高阶顾问（按需） → 详见 `/gemini-collaboration`
 
 ## 任务拆分原则（分发给 Coder）
@@ -36,13 +36,13 @@ description: |
 
 ### 2. Coder 执行
 
-所有代码、文档等内容改动任务，**直接委托 Coder 执行**。
+所有代码、文档等内容改动或修改任务，**直接委托 Coder 执行**。
 
 ### 3. Claude 快检
 
 Coder 执行完毕后，Claude 快速读取验收：
 - **无误** → 继续下一步（调用 Codex 审核）
-- **有误** → 委托 Coder 修复（**严禁 Claude 自行写代码**）
+- **有误** → 委托 Coder 修复（**严禁禁止 Claude 自行写代码,无论简单与否都禁止 Claude 自行写代码**）
 
 ### 4. Codex 审核
 
@@ -51,15 +51,16 @@ Coder 执行完毕后，Claude 快速读取验收：
 - 结论：✅ 通过 / ⚠️ 优化 / ❌ 修改
 
 **审核结果处理**：
+
 - ✅ 通过 → 继续下一步任务
-- ⚠️/❌ 有问题 → 委托 Coder 修复 → 再次审核 → 循环直至通过
+- ⚠️/❌ 有问题 → 委托 Coder 修复 → 再次审核 → 循环直至项目测试通过
 
 ## 工具参考
 
 | 工具 | 用途 | sandbox | 重试 |
 |------|------|---------|------|
-| Coder | 执行改动 | workspace-write | 默认不重试 |
-| Codex | 代码审核 | read-only | 默认 1 次 |
+| Coder | 执行文件改动 | workspace-write | 默认不重试 |
+| Codex | 代码文件审核或审查 | read-only | 默认 1 次 |
 | Gemini | 顾问/执行 | workspace-write (yolo) | 默认 1 次 |
 
 > 💡 **Gemini 详细指南**：如需了解 Gemini 的具体调用方式和触发场景，请执行 `/gemini-collaboration` 技能。
@@ -70,4 +71,6 @@ Coder 执行完毕后，Claude 快速读取验收：
 
 Coder/Codex/Gemini 的意见仅供参考。你（Claude）是最终决策者，需批判性思考，做出最优决策。
 
-详细参数：[coder-guide.md](coder-guide.md) | [codex-guide.md](codex-guide.md)
+详细和参考参数：[coder-guide.md](coder-guide.md) | [codex-guide.md](codex-guide.md)|[examples.md](examples.md)
+
+推荐约束提示词：[constraint.md](constraint.md)
