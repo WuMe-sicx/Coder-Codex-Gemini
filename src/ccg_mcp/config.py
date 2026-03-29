@@ -130,7 +130,7 @@ def build_coder_env(config: dict[str, Any]) -> dict[str, str]:
     return env
 
 
-_GEMINI_ENV_KEYS = {"GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_GEMINI_BASE_URL"}
+_GEMINI_ENV_KEYS = {"GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_GEMINI_BASE_URL", "GEMINI_MODEL"}
 
 
 def _gemini_env_candidates() -> list[Path]:

@@ -699,8 +699,8 @@ async def gemini_tool(
             # read-only 需要启用 sandbox
             cmd.append("--sandbox")
 
-    # 指定模型（默认使用 gemini-3-pro-preview）
-    model_to_use = model if model else "gemini-3-pro-preview"
+    # 指定模型：参数 > GEMINI_MODEL 环境变量 > 硬编码默认值
+    model_to_use = model or gemini_env.get("GEMINI_MODEL") or "gemini-3-pro-preview"
     cmd.extend(["--model", model_to_use])
 
     # 会话恢复
