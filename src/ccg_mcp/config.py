@@ -176,26 +176,19 @@ def _load_gemini_dotenv() -> dict[str, str]:
     return result
 
 
-def build_gemini_env(config: dict[str, Any]) -> dict[str, str]:
-    """构建 Gemini 调用所需的环境变量
+def ensure_gemini_env() -> None:
+    """Ensure Gemini API keys are in os.environ.
 
-    主动从 ~/.gemini/.env 读取 GEMINI_API_KEY 等变量并注入子进程环境，
-    不依赖父进程（VSCode/Claude Code）的环境快照。仅注入白名单键。
+    Reads from ~/.gemini/.env and injects whitelisted keys (GEMINI_API_KEY,
+    GOOGLE_API_KEY, GOOGLE_GEMINI_BASE_URL) into os.environ ONLY if they
+    are not already set. This allows the subprocess to inherit them naturally,
+    matching the Codex pattern (no custom env dict).
 
-    Args:
-        config: 配置字典（保留参数签名，供未来扩展）
-
-    Returns:
-        包含所有环境变量的字典
+    Args: none (config parameter removed — not used)
     """
-    env = os.environ.copy()
-
-    # 从 ~/.gemini/.env 读取并注入白名单键（不覆盖已有值）
     for key, value in _load_gemini_dotenv().items():
-        if key in _GEMINI_ENV_KEYS and not env.get(key):
-            env[key] = value
-
-    return env
+        if key in _GEMINI_ENV_KEYS and not os.environ.get(key):
+            os.environ[key] = value
 
 
 def build_coder_settings_json(config: dict[str, Any]) -> str:
