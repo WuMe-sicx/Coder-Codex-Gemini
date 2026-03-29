@@ -20,7 +20,7 @@ from typing import Annotated, Any, Dict, Generator, Iterator, List, Literal, Opt
 
 from pydantic import Field
 
-from ccg_mcp.config import ensure_gemini_env
+from ccg_mcp.config import build_gemini_env
 
 
 # ============================================================================
@@ -151,6 +151,7 @@ def run_gemini_command(
     max_duration: int = 1800,
     prompt: str = "",
     cwd: Optional[Path] = None,
+    env: Optional[Dict[str, str]] = None,
 ) -> Generator[str, None, tuple[Optional[int], int]]:
     """执行 Gemini 命令并流式返回输出
 
@@ -189,6 +190,7 @@ def run_gemini_command(
         universal_newlines=True,
         encoding='utf-8',
         errors='replace',  # 处理非 UTF-8 字符，避免 UnicodeDecodeError
+        env=env,
         cwd=str(cwd) if cwd else None,
     )
 
@@ -324,6 +326,7 @@ def safe_gemini_command(
     max_duration: int = 1800,
     prompt: str = "",
     cwd: Optional[Path] = None,
+    env: Optional[Dict[str, str]] = None,
 ) -> Iterator[tuple[Generator[str, None, None], Dict[str, Any]]]:
     """安全执行 Gemini 命令的上下文管理器
 
@@ -353,6 +356,7 @@ def safe_gemini_command(
         universal_newlines=True,
         encoding='utf-8',
         errors='replace',  # 处理非 UTF-8 字符，避免 UnicodeDecodeError
+        env=env,
         cwd=str(cwd) if cwd else None,
     )
 
@@ -674,8 +678,8 @@ async def gemini_tool(
     # gemini CLI 命令格式: gemini [options]
     # 使用 -y/--yolo 跳过确认，--sandbox 启用沙箱
     # 参考: https://geminicli.com/docs/cli/headless/
-    # 确保 Gemini API 密钥已注入 os.environ，供子进程自然继承
-    ensure_gemini_env()
+    # 构建包含 Gemini API 密钥的环境变量字典，强制覆盖 .gemini/.env 中的白名单键
+    gemini_env = build_gemini_env()
 
     cmd = ["gemini"]
 
@@ -723,7 +727,7 @@ async def gemini_tool(
         last_lines: list[str] = []
 
         try:
-            with safe_gemini_command(cmd, timeout=timeout, max_duration=max_duration, prompt=PROMPT, cwd=cd) as (gen, result_holder):
+            with safe_gemini_command(cmd, timeout=timeout, max_duration=max_duration, prompt=PROMPT, cwd=cd, env=gemini_env) as (gen, result_holder):
                 for line in gen:
                     last_lines.append(line)
                     if len(last_lines) > 50:

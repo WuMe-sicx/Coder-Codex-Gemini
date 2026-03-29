@@ -176,6 +176,25 @@ def _load_gemini_dotenv() -> dict[str, str]:
     return result
 
 
+def build_gemini_env() -> dict[str, str]:
+    """构建 Gemini 调用所需的环境变量
+
+    仿照 build_coder_env 模式：os.environ.copy() + 从 ~/.gemini/.env 强制覆盖白名单键。
+    优先级：.gemini/.env 值 > 父进程继承值
+
+    Returns:
+        包含所有环境变量的字典
+    """
+    env = os.environ.copy()
+
+    # 从 ~/.gemini/.env 强制覆盖白名单键（不检查是否已存在）
+    for key, value in _load_gemini_dotenv().items():
+        if key in _GEMINI_ENV_KEYS:
+            env[key] = value
+
+    return env
+
+
 def ensure_gemini_env() -> None:
     """Ensure Gemini API keys are in os.environ.
 
