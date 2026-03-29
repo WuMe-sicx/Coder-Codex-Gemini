@@ -129,6 +129,9 @@ def build_coder_env(config: dict[str, Any]) -> dict[str, str]:
     return env
 
 
+_GEMINI_ENV_KEYS = {"GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_GEMINI_BASE_URL"}
+
+
 def _load_gemini_dotenv() -> dict[str, str]:
     """从 ~/.gemini/.env 读取环境变量
 
@@ -144,18 +147,27 @@ def _load_gemini_dotenv() -> dict[str, str]:
 
     result: dict[str, str] = {}
     try:
-        for line in env_path.read_text(encoding="utf-8").splitlines():
+        content = env_path.read_text(encoding="utf-8-sig")  # utf-8-sig 自动去除 BOM
+        for line in content.splitlines():
             line = line.strip()
             if not line or line.startswith("#"):
                 continue
+            # 去掉 export 前缀
+            if line.startswith("export "):
+                line = line[7:].lstrip()
             if "=" not in line:
                 continue
             key, _, value = line.partition("=")
             key = key.strip()
             value = value.strip()
-            # 去除可选的引号包裹
+            # 去除可选的引号包裹（引号内的 # 保留）
             if len(value) >= 2 and value[0] == value[-1] and value[0] in ('"', "'"):
                 value = value[1:-1]
+            else:
+                # 无引号包裹时，去除行尾注释
+                hash_pos = value.find("#")
+                if hash_pos != -1:
+                    value = value[:hash_pos].rstrip()
             if key:
                 result[key] = value
     except (OSError, UnicodeDecodeError):
@@ -168,7 +180,7 @@ def build_gemini_env(config: dict[str, Any]) -> dict[str, str]:
     """构建 Gemini 调用所需的环境变量
 
     主动从 ~/.gemini/.env 读取 GEMINI_API_KEY 等变量并注入子进程环境，
-    不依赖父进程（VSCode/Claude Code）的环境快照。
+    不依赖父进程（VSCode/Claude Code）的环境快照。仅注入白名单键。
 
     Args:
         config: 配置字典（保留参数签名，供未来扩展）
@@ -178,9 +190,9 @@ def build_gemini_env(config: dict[str, Any]) -> dict[str, str]:
     """
     env = os.environ.copy()
 
-    # 从 ~/.gemini/.env 读取并注入（不覆盖已有值）
+    # 从 ~/.gemini/.env 读取并注入白名单键（不覆盖已有值）
     for key, value in _load_gemini_dotenv().items():
-        if key not in env:
+        if key in _GEMINI_ENV_KEYS and key not in env:
             env[key] = value
 
     return env
