@@ -681,16 +681,6 @@ async def gemini_tool(
     # 构建包含 Gemini API 密钥的环境变量字典，强制覆盖 .gemini/.env 中的白名单键
     gemini_env = build_gemini_env()
 
-    # DEBUG: 诊断 env 传递问题（临时）
-    import os as _os
-    _debug_info = {
-        "key_in_os_environ": bool(_os.environ.get('GEMINI_API_KEY')),
-        "key_in_gemini_env": bool(gemini_env.get('GEMINI_API_KEY')),
-        "HOME": _os.environ.get('HOME', 'UNSET'),
-        "USERPROFILE": _os.environ.get('USERPROFILE', 'UNSET'),
-        "cwd": str(cd),
-    }
-
     cmd = ["gemini"]
 
     # 添加流式 JSON 输出格式（用于 headless mode）
@@ -978,9 +968,6 @@ async def gemini_tool(
             ),
             "duration": metrics.format_duration(),
         }
-
-    # DEBUG: 临时注入诊断信息
-    result["_debug"] = _debug_info
 
     if return_all_messages:
         result["all_messages"] = all_messages
