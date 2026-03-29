@@ -192,7 +192,7 @@ def build_gemini_env(config: dict[str, Any]) -> dict[str, str]:
 
     # 从 ~/.gemini/.env 读取并注入白名单键（不覆盖已有值）
     for key, value in _load_gemini_dotenv().items():
-        if key in _GEMINI_ENV_KEYS and key not in env:
+        if key in _GEMINI_ENV_KEYS and not env.get(key):
             env[key] = value
 
     return env
