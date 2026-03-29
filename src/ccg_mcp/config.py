@@ -20,52 +20,6 @@ class ConfigError(Exception):
     pass
 
 
-def _read_windows_env_var(name: str) -> str:
-    """从 Windows 注册表读取环境变量（绕过进程环境快照）
-
-    Windows 上 os.environ 是进程启动时的快照，后续通过系统设置添加的
-    环境变量不会自动刷新。此函数直接从注册表读取当前实际值。
-
-    优先级：用户环境变量 > 系统环境变量
-
-    Args:
-        name: 环境变量名
-
-    Returns:
-        环境变量值，未找到或非 Windows 平台返回空字符串
-    """
-    if os.name != "nt":
-        return ""
-
-    try:
-        import winreg
-
-        # 先查用户级环境变量（HKCU\Environment）
-        try:
-            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Environment") as key:
-                value, _ = winreg.QueryValueEx(key, name)
-                if value:
-                    return str(value)
-        except (FileNotFoundError, OSError):
-            pass
-
-        # 再查系统级环境变量（HKLM\...\Environment）
-        try:
-            with winreg.OpenKey(
-                winreg.HKEY_LOCAL_MACHINE,
-                r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment",
-            ) as key:
-                value, _ = winreg.QueryValueEx(key, name)
-                if value:
-                    return str(value)
-        except (FileNotFoundError, OSError):
-            pass
-    except ImportError:
-        pass
-
-    return ""
-
-
 def get_config_path() -> Path:
     """获取配置文件路径"""
     return Path.home() / ".ccg-mcp" / "config.toml"
@@ -179,7 +133,8 @@ def build_gemini_env(config: dict[str, Any]) -> dict[str, str]:
     """构建 Gemini 调用所需的环境变量
 
     从 config.toml 的 [gemini] 段读取 api_key，注入 GEMINI_API_KEY。
-    如果未配置 [gemini] 段，返回当前环境的副本（保持向后兼容）。
+    与 build_coder_env 同理：通过 subprocess env 注入，确保子进程拿到正确的值，
+    不依赖父进程（VSCode/Claude Code）的环境快照。
 
     Args:
         config: 配置字典
@@ -192,17 +147,10 @@ def build_gemini_env(config: dict[str, Any]) -> dict[str, str]:
         gemini_config = {}
     env = os.environ.copy()
 
-    # 设置 GEMINI_API_KEY
-    # 优先级：config.toml > os.environ > Windows 注册表
+    # 设置 GEMINI_API_KEY（config.toml 为唯一可靠来源）
     api_key = gemini_config.get("api_key", "")
     if api_key:
         env["GEMINI_API_KEY"] = api_key
-    elif not env.get("GEMINI_API_KEY"):
-        # os.environ 中也没有，尝试从 Windows 注册表读取实际值
-        # （解决 VSCode/Claude Code 进程环境快照过期的问题）
-        registry_key = _read_windows_env_var("GEMINI_API_KEY")
-        if registry_key:
-            env["GEMINI_API_KEY"] = registry_key
 
     # 设置 GOOGLE_GEMINI_BASE_URL（如果配置了）
     base_url = gemini_config.get("base_url", "")
