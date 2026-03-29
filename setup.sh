@@ -72,85 +72,40 @@ else
 fi
 
 # ==============================================================================
-# Step 3: Register MCP server
+# Step 3: Generate MCP server configuration
 # ==============================================================================
-write_step "Step 3: Registering MCP server..."
+write_step "Step 3: Generating MCP server configuration..."
 
-# Check uv version to determine if --refresh is supported
-USE_REFRESH=false
-UV_VERSION_KNOWN=false
-
-UV_VERSION_OUTPUT=$(uv --version 2>&1) || true
-if [[ "$UV_VERSION_OUTPUT" =~ uv\ ([0-9]+)\.([0-9]+)\.([0-9]+) ]]; then
-    UV_VERSION_KNOWN=true
-    MAJOR="${BASH_REMATCH[1]}"
-    MINOR="${BASH_REMATCH[2]}"
-    # --refresh requires uv >= 0.4.0
-    if [ "$MAJOR" -gt 0 ] || ([ "$MAJOR" -eq 0 ] && [ "$MINOR" -ge 4 ]); then
-        USE_REFRESH=true
-    fi
+# Detect uvx path
+UVX_PATH=$(command -v uvx 2>/dev/null || echo "uvx")
+if [ "$UVX_PATH" = "uvx" ]; then
+    write_warning "uvx not found in PATH, using 'uvx' as command"
 fi
 
-# Build the args array based on uv version
-if [ "$USE_REFRESH" = true ]; then
-    MCP_ARGS='["--refresh", "--from", "git+https://github.com/isYangs/Coder-Codex-Gemini.git", "ccg-mcp"]'
-    REFRESH_NOTE="(with --refresh)"
-else
-    MCP_ARGS='["--from", "git+https://github.com/isYangs/Coder-Codex-Gemini.git", "ccg-mcp"]'
-    if [ "$UV_VERSION_KNOWN" = true ]; then
-        write_warning "Your uv version does not support --refresh option (requires uv >= 0.4.0)"
-    else
-        write_warning "Could not determine uv version, skipping --refresh option"
-    fi
-    write_warning "Consider upgrading uv: curl -LsSf https://astral.sh/uv/install.sh | sh"
-    REFRESH_NOTE="(without --refresh)"
-fi
-
-# Use Python to directly modify ~/.claude/settings.json
-python3 -c "
-import json
-import os
-
-settings_path = os.path.expanduser('~/.claude/settings.json')
-settings_dir = os.path.expanduser('~/.claude')
-
-# Create .claude directory if it doesn't exist
-os.makedirs(settings_dir, exist_ok=True)
-
-# Read existing settings or create new structure
-if os.path.exists(settings_path):
-    try:
-        with open(settings_path, 'r') as f:
-            content = f.read().strip()
-            settings = json.loads(content) if content else {}
-    except (json.JSONDecodeError, ValueError):
-        print('[WARN] settings.json is corrupt, will recreate')
-        settings = {}
-else:
-    settings = {}
-
-# Ensure mcpServers exists
-if 'mcpServers' not in settings:
-    settings['mcpServers'] = {}
-
-# Remove existing ccg entry if present
-if 'ccg' in settings['mcpServers']:
-    print('[WARN] Removed existing ccg MCP server')
-
-# Add the new ccg MCP server entry
-settings['mcpServers']['ccg'] = {
-    'command': 'uvx',
-    'args': $MCP_ARGS
+# Build MCP config JSON using Python for proper escaping
+MCP_JSON=$(PROJECT_DIR="$SCRIPT_DIR" UVX_CMD="$UVX_PATH" python3 -c "
+import json, os
+config = {
+    'args': ['--from', 'file:' + os.environ['PROJECT_DIR'], 'ccg-mcp'],
+    'command': os.environ['UVX_CMD'],
+    'cwd': os.environ['PROJECT_DIR'],
+    'type': 'stdio'
 }
+print(json.dumps(config, indent=2))
+")
 
-# Write back to file with proper formatting
-with open(settings_path, 'w') as f:
-    json.dump(settings, f, indent=2)
-    f.write('\n')
-" && write_success "MCP server registered $REFRESH_NOTE" || {
-    write_error "Failed to register MCP server"
-    exit 1
-}
+echo ""
+echo -e "${CYAN}============================================================${NC}"
+echo -e "${CYAN}  MCP Server Configuration (add to settings.json manually)${NC}"
+echo -e "${CYAN}============================================================${NC}"
+echo ""
+echo -e "${YELLOW}Add the following to mcpServers.ccg in:${NC}"
+echo "  ~/.claude/settings.json"
+echo ""
+echo -e "${GREEN}${MCP_JSON}${NC}"
+echo ""
+echo -e "${CYAN}============================================================${NC}"
+write_success "MCP configuration generated"
 
 # ==============================================================================
 # Step 4: Install Skills

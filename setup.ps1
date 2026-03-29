@@ -169,104 +169,54 @@ if ($DryRun) {
 }
 
 # ==============================================================================
-# Step 3: Register MCP server
+# Step 3: Generate MCP server configuration
 # ==============================================================================
-Write-Step "Step 3: Registering MCP server..."
+Write-Step "Step 3: Generating MCP server configuration..."
 
-# Check uv version to determine if --refresh is supported
-$useRefresh = $false
-$uvVersionKnown = $false
+$projectDir = $PSScriptRoot
 
+# Detect uvx path
+$uvxPath = $null
 try {
-    $uvVersionOutput = uv --version 2>&1
-    if ($uvVersionOutput -match "uv (\d+)\.(\d+)\.(\d+)") {
-        $uvVersionKnown = $true
-        $major = [int]$Matches[1]
-        $minor = [int]$Matches[2]
-        # --refresh requires uv >= 0.4.0
-        if ($major -gt 0 -or ($major -eq 0 -and $minor -ge 4)) {
-            $useRefresh = $true
-        }
-    }
-} catch {}
-
-# Build the args array based on uv version
-if ($useRefresh) {
-    $mcpArgs = @("--refresh", "--from", "git+https://github.com/isYangs/Coder-Codex-Gemini.git", "ccg-mcp")
-    $refreshNote = "(with --refresh)"
-} else {
-    $mcpArgs = @("--from", "git+https://github.com/isYangs/Coder-Codex-Gemini.git", "ccg-mcp")
-    if ($uvVersionKnown) {
-        Write-WarningMsg "Your uv version does not support --refresh option (requires uv >= 0.4.0)"
-    } else {
-        Write-WarningMsg "Could not determine uv version, skipping --refresh option"
-    }
-    Write-WarningMsg "Consider upgrading uv: powershell -c `"irm https://astral.sh/uv/install.ps1 | iex`""
-    $refreshNote = "(without --refresh)"
+    $uvxPath = (Get-Command uvx -ErrorAction Stop).Source
+} catch {
+    Refresh-PathFromRegistry
+    try {
+        $uvxPath = (Get-Command uvx -ErrorAction Stop).Source
+    } catch {}
 }
+
+if (-not $uvxPath) {
+    Write-WarningMsg "uvx not found in PATH, using 'uvx' as command"
+    $uvxPath = "uvx"
+}
+
+# Build MCP config JSON
+$mcpConfig = [PSCustomObject]@{
+    args = @("--from", "file:$projectDir", "ccg-mcp")
+    command = $uvxPath
+    cwd = $projectDir
+    type = "stdio"
+}
+
+$mcpJson = $mcpConfig | ConvertTo-Json -Depth 5
 
 if ($DryRun) {
-    Write-DryRun "Would modify: $env:USERPROFILE\.claude\settings.json"
-    Write-DryRun "Would add/update mcpServers.ccg entry with args: $($mcpArgs -join ', ')"
-    Write-Success "MCP server would be registered $refreshNote"
-} else {
-    # Directly modify settings.json
-    $settingsPath = "$env:USERPROFILE\.claude\settings.json"
-    $settingsDir = "$env:USERPROFILE\.claude"
-
-    try {
-        # Create .claude directory if it doesn't exist
-        if (!(Test-Path $settingsDir)) {
-            New-Item -ItemType Directory -Path $settingsDir -Force | Out-Null
-        }
-
-        # Read existing settings or create new structure
-        if (Test-Path $settingsPath) {
-            try {
-                $raw = Get-Content $settingsPath -Raw -Encoding UTF8
-                if ([string]::IsNullOrWhiteSpace($raw)) {
-                    $settings = [PSCustomObject]@{}
-                } else {
-                    $settings = $raw | ConvertFrom-Json
-                }
-            } catch {
-                Write-WarningMsg "settings.json is corrupt, will recreate"
-                $settings = [PSCustomObject]@{}
-            }
-        } else {
-            $settings = [PSCustomObject]@{}
-        }
-
-        # Ensure mcpServers exists
-        if (!($settings.PSObject.Properties.Name -contains "mcpServers")) {
-            $settings | Add-Member -Type NoteProperty -Name "mcpServers" -Value ([PSCustomObject]@{})
-        }
-
-        # Check if ccg entry already exists
-        $ccgExisted = $settings.mcpServers.PSObject.Properties.Name -contains "ccg"
-        if ($ccgExisted) {
-            Write-WarningMsg "Removed existing ccg MCP server"
-        }
-
-        # Create the ccg MCP server entry
-        $ccgEntry = [PSCustomObject]@{
-            command = "uvx"
-            args = $mcpArgs
-        }
-
-        # Update the mcpServers.ccg entry
-        $settings.mcpServers | Add-Member -Type NoteProperty -Name "ccg" -Value $ccgEntry -Force
-
-        # Convert to JSON with proper formatting and write back
-        $jsonOutput = $settings | ConvertTo-Json -Depth 10
-        [System.IO.File]::WriteAllText($settingsPath, $jsonOutput, [System.Text.UTF8Encoding]::new($false))
-
-        Write-Success "MCP server registered $refreshNote"
-    } catch {
-        Write-ErrorMsg "Failed to register MCP server: $_"
-        exit 1
-    }
+    Write-DryRun "Would generate MCP configuration"
 }
+
+Write-Host ""
+Write-Host "============================================================" -ForegroundColor Cyan
+Write-Host "  MCP Server Configuration (add to settings.json manually)" -ForegroundColor Cyan
+Write-Host "============================================================" -ForegroundColor Cyan
+Write-Host ""
+Write-Host "Add the following to mcpServers.ccg in:" -ForegroundColor Yellow
+Write-Host "  $env:USERPROFILE\.claude\settings.json" -ForegroundColor White
+Write-Host ""
+Write-Host $mcpJson -ForegroundColor Green
+Write-Host ""
+Write-Host "============================================================" -ForegroundColor Cyan
+Write-Success "MCP configuration generated"
 
 # ==============================================================================
 # Step 4: Install Skills
