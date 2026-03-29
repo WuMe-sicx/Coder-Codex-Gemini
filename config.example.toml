@@ -26,3 +26,15 @@ CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1"
 # 一般不需要配置，Codex 工具会使用 codex CLI 自己的配置
 # 如需在调用时覆盖模型，可通过 MCP 工具的 model 参数指定
 # 示例：调用时传入 model="o1"
+
+# Gemini 配置（可选）
+# 如果已通过 Google OAuth 登录 Gemini CLI，可不填
+# API Key 获取：https://aistudio.google.com/apikey
+[gemini]
+api_key = "your-gemini-api-key"
+# 自定义 API 地址（可选，映射到 GOOGLE_GEMINI_BASE_URL）
+# base_url = "https://your-custom-endpoint.com"
+
+# 额外环境变量（可选）
+# [gemini.env]
+# CUSTOM_VAR = "value"

@@ -129,6 +129,40 @@ def build_coder_env(config: dict[str, Any]) -> dict[str, str]:
     return env
 
 
+def build_gemini_env(config: dict[str, Any]) -> dict[str, str]:
+    """构建 Gemini 调用所需的环境变量
+
+    从 config.toml 的 [gemini] 段读取 api_key，注入 GEMINI_API_KEY。
+    如果未配置 [gemini] 段，返回当前环境的副本（保持向后兼容）。
+
+    Args:
+        config: 配置字典
+
+    Returns:
+        包含所有环境变量的字典
+    """
+    gemini_config = config.get("gemini", {})
+    if not isinstance(gemini_config, dict):
+        gemini_config = {}
+    env = os.environ.copy()
+
+    # 设置 GEMINI_API_KEY（如果配置了）
+    api_key = gemini_config.get("api_key", "")
+    if api_key:
+        env["GEMINI_API_KEY"] = api_key
+
+    # 设置 GOOGLE_GEMINI_BASE_URL（如果配置了）
+    base_url = gemini_config.get("base_url", "")
+    if base_url:
+        env["GOOGLE_GEMINI_BASE_URL"] = base_url
+
+    # 用户自定义的额外环境变量
+    for key, value in gemini_config.get("env", {}).items():
+        env[key] = str(value)
+
+    return env
+
+
 def build_coder_settings_json(config: dict[str, Any]) -> str:
     """构建 --settings 参数的 JSON 字符串
 

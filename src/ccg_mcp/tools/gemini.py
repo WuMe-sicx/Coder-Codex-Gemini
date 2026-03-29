@@ -20,6 +20,8 @@ from typing import Annotated, Any, Dict, Generator, Iterator, List, Literal, Opt
 
 from pydantic import Field
 
+from ccg_mcp.config import build_gemini_env, load_config, ConfigError
+
 
 # ============================================================================
 # 错误类型定义
@@ -322,6 +324,7 @@ def safe_gemini_command(
     max_duration: int = 1800,
     prompt: str = "",
     cwd: Optional[Path] = None,
+    env: Optional[dict[str, str]] = None,
 ) -> Iterator[tuple[Generator[str, None, None], Dict[str, Any]]]:
     """安全执行 Gemini 命令的上下文管理器
 
@@ -352,6 +355,7 @@ def safe_gemini_command(
         encoding='utf-8',
         errors='replace',  # 处理非 UTF-8 字符，避免 UnicodeDecodeError
         cwd=str(cwd) if cwd else None,
+        env=env,
     )
 
     thread: Optional[threading.Thread] = None
@@ -672,6 +676,15 @@ async def gemini_tool(
     # gemini CLI 命令格式: gemini [options]
     # 使用 -y/--yolo 跳过确认，--sandbox 启用沙箱
     # 参考: https://geminicli.com/docs/cli/headless/
+    # 构建环境变量（注入 GEMINI_API_KEY）
+    try:
+        config = load_config()
+    except (ConfigError, FileNotFoundError):
+        # load_config() 在 coder 未配置时抛 ConfigError，
+        # 但 gemini 可独立使用，静默回退
+        config = {}
+    gemini_env = build_gemini_env(config)
+
     cmd = ["gemini"]
 
     # 添加流式 JSON 输出格式（用于 headless mode）
@@ -718,7 +731,7 @@ async def gemini_tool(
         last_lines: list[str] = []
 
         try:
-            with safe_gemini_command(cmd, timeout=timeout, max_duration=max_duration, prompt=PROMPT, cwd=cd) as (gen, result_holder):
+            with safe_gemini_command(cmd, timeout=timeout, max_duration=max_duration, prompt=PROMPT, cwd=cd, env=gemini_env) as (gen, result_holder):
                 for line in gen:
                     last_lines.append(line)
                     if len(last_lines) > 50:
