@@ -132,36 +132,16 @@ def build_coder_env(config: dict[str, Any]) -> dict[str, str]:
 def build_gemini_env(config: dict[str, Any]) -> dict[str, str]:
     """构建 Gemini 调用所需的环境变量
 
-    从 config.toml 的 [gemini] 段读取 api_key，注入 GEMINI_API_KEY。
-    与 build_coder_env 同理：通过 subprocess env 注入，确保子进程拿到正确的值，
-    不依赖父进程（VSCode/Claude Code）的环境快照。
+    Gemini CLI 原生读取 ~/.gemini/.env 中的 GEMINI_API_KEY，
+    无需通过 config.toml 中转。此函数仅传递当前环境的副本。
 
     Args:
-        config: 配置字典
+        config: 配置字典（保留参数签名，供未来扩展）
 
     Returns:
         包含所有环境变量的字典
     """
-    gemini_config = config.get("gemini", {})
-    if not isinstance(gemini_config, dict):
-        gemini_config = {}
-    env = os.environ.copy()
-
-    # 设置 GEMINI_API_KEY（config.toml 为唯一可靠来源）
-    api_key = gemini_config.get("api_key", "")
-    if api_key:
-        env["GEMINI_API_KEY"] = api_key
-
-    # 设置 GOOGLE_GEMINI_BASE_URL（如果配置了）
-    base_url = gemini_config.get("base_url", "")
-    if base_url:
-        env["GOOGLE_GEMINI_BASE_URL"] = base_url
-
-    # 用户自定义的额外环境变量
-    for key, value in gemini_config.get("env", {}).items():
-        env[key] = str(value)
-
-    return env
+    return os.environ.copy()
 
 
 def build_coder_settings_json(config: dict[str, Any]) -> str:
