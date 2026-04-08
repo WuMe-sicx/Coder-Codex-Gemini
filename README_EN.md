@@ -167,14 +167,14 @@ We provide one-click setup scripts that automate all configuration steps:
 
 **Windows (Double-click or run in terminal)**
 ```powershell
-git clone https://github.com/isYangs/Coder-Codex-Gemini.git
+git clone https://github.com/WuMe-sicx/Coder-Codex-Gemini.git
 cd Coder-Codex-Gemini
 .\setup.bat
 ```
 
 **macOS/Linux**
 ```bash
-git clone https://github.com/isYangs/Coder-Codex-Gemini.git
+git clone https://github.com/WuMe-sicx/Coder-Codex-Gemini.git
 cd Coder-Codex-Gemini
 chmod +x setup.sh && ./setup.sh
 ```
@@ -221,7 +221,7 @@ chmod +x setup.sh && ./setup.sh
     ```
     --refresh
     --from
-    git+https://github.com/isYangs/Coder-Codex-Gemini.git
+    git+https://github.com/WuMe-sicx/Coder-Codex-Gemini.git
     ccg-mcp
     ```
   - **Transport**: `stdio`
@@ -236,7 +236,7 @@ CCG's Coder tool requires backend model API configuration. Please refer to the "
 
 **3. Install Skills (Optional)**
 
-- Method 1: In CC Switch's Skills Manager, add this project's GitHub repository `https://github.com/isYangs/Coder-Codex-Gemini.git`, select `skills/ccg-workflow` and `skills/gemini-collaboration` to install
+- Method 1: In CC Switch's Skills Manager, add this project's GitHub repository `https://github.com/WuMe-sicx/Coder-Codex-Gemini.git`, select `skills/ccg-workflow` and `skills/gemini-collaboration` to install
 - Method 2: Manually copy the `skills/` directory from this project to `~/.claude/skills/`
 
 **4. Configure Global Prompts (Recommended)**
@@ -267,7 +267,7 @@ Restart Claude Code CLI, run `claude mcp list` to check if CCG is connected.
 One-click scripts use remote installation by default. For manual installation:
 
 ```bash
-claude mcp add ccg -s user --transport stdio -- uvx --refresh --from git+https://github.com/isYangs/Coder-Codex-Gemini.git ccg-mcp
+claude mcp add ccg -s user --transport stdio -- uvx --refresh --from git+https://github.com/WuMe-sicx/Coder-Codex-Gemini.git ccg-mcp
 ```
 
 #### Local Installation (Development Only)
@@ -667,14 +667,14 @@ This project uses a **MCP + Skills + Global Prompt** hybrid architecture in Clau
 
 **Windows (Double-click or run in terminal)**
 ```powershell
-git clone https://github.com/isYangs/Coder-Codex-Gemini.git
+git clone https://github.com/WuMe-sicx/Coder-Codex-Gemini.git
 cd Coder-Codex-Gemini
 .\setup-opencode.bat
 ```
 
 **macOS/Linux**
 ```bash
-git clone https://github.com/isYangs/Coder-Codex-Gemini.git
+git clone https://github.com/WuMe-sicx/Coder-Codex-Gemini.git
 cd Coder-Codex-Gemini
 chmod +x setup-opencode.sh && ./setup-opencode.sh
 ```
@@ -821,7 +821,7 @@ Issues and Pull Requests are welcome!
 
 ```bash
 # 1. Clone repository
-git clone https://github.com/isYangs/Coder-Codex-Gemini.git
+git clone https://github.com/WuMe-sicx/Coder-Codex-Gemini.git
 cd Coder-Codex-Gemini
 
 # 2. Install dependencies (using uv)

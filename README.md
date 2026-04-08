@@ -167,14 +167,14 @@ flowchart TB
 
 **Windows（双击运行或终端执行）**
 ```powershell
-git clone https://github.com/isYangs/Coder-Codex-Gemini.git
+git clone https://github.com/WuMe-sicx/Coder-Codex-Gemini.git
 cd Coder-Codex-Gemini
 .\setup.bat
 ```
 
 **macOS/Linux**
 ```bash
-git clone https://github.com/isYangs/Coder-Codex-Gemini.git
+git clone https://github.com/WuMe-sicx/Coder-Codex-Gemini.git
 cd Coder-Codex-Gemini
 chmod +x setup.sh && ./setup.sh
 ```
@@ -221,7 +221,7 @@ chmod +x setup.sh && ./setup.sh
     ```
     --refresh
     --from
-    git+https://github.com/isYangs/Coder-Codex-Gemini.git
+    git+https://github.com/WuMe-sicx/Coder-Codex-Gemini.git
     ccg-mcp
     ```
   - **Transport**：`stdio`
@@ -236,7 +236,7 @@ CCG 的 Coder 工具需要配置后端模型 API。请参考前面的"配置 Cod
 
 **3. 安装 Skills（可选）**
 
-- 方式一：在 CC Switch 的 Skills 管理器中，添加本项目的 GitHub 仓库 `https://github.com/isYangs/Coder-Codex-Gemini.git`，选择 `skills/ccg-workflow` 和 `skills/gemini-collaboration` 进行安装
+- 方式一：在 CC Switch 的 Skills 管理器中，添加本项目的 GitHub 仓库 `https://github.com/WuMe-sicx/Coder-Codex-Gemini.git`，选择 `skills/ccg-workflow` 和 `skills/gemini-collaboration` 进行安装
 - 方式二：手动复制本项目的 `skills/` 目录到 `~/.claude/skills/`
 
 **4. 配置全局 Prompt（推荐）**
@@ -295,7 +295,7 @@ uv --version
 一键脚本默认使用远程安装方式，无需额外操作。如需手动安装：
 
 ```bash
-claude mcp add ccg -s user --transport stdio -- uvx --refresh --from git+https://github.com/isYangs/Coder-Codex-Gemini.git ccg-mcp
+claude mcp add ccg -s user --transport stdio -- uvx --refresh --from git+https://github.com/WuMe-sicx/Coder-Codex-Gemini.git ccg-mcp
 ```
 
 #### 本地安装（仅开发调试）
@@ -717,14 +717,14 @@ ccg: ... - ✓ Connected
 
 **Windows（双击运行或终端执行）**
 ```powershell
-git clone https://github.com/isYangs/Coder-Codex-Gemini.git
+git clone https://github.com/WuMe-sicx/Coder-Codex-Gemini.git
 cd Coder-Codex-Gemini
 .\setup-opencode.bat
 ```
 
 **macOS/Linux**
 ```bash
-git clone https://github.com/isYangs/Coder-Codex-Gemini.git
+git clone https://github.com/WuMe-sicx/Coder-Codex-Gemini.git
 cd Coder-Codex-Gemini
 chmod +x setup-opencode.sh && ./setup-opencode.sh
 ```
@@ -871,7 +871,7 @@ opencode auth login
 
 ```bash
 # 1. 克隆仓库
-git clone https://github.com/isYangs/Coder-Codex-Gemini.git
+git clone https://github.com/WuMe-sicx/Coder-Codex-Gemini.git
 cd Coder-Codex-Gemini
 
 # 2. 安装依赖 (使用 uv)
