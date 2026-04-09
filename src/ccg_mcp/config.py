@@ -15,6 +15,17 @@ from typing import Any
 # 示例模型名称，仅用于配置引导文本
 _EXAMPLE_MODEL = "glm-4.7"
 
+# 父进程 Claude Code 设置的干扰变量，必须从子进程环境中移除
+# CLAUDE_CODE_ENTRYPOINT=claude-vscode 会导致 -p 模式下 API Key 被拒绝
+# ANTHROPIC_MODEL/ANTHROPIC_SMALL_FAST_MODEL 会绕过别名映射，导致使用了错误的模型
+_PARENT_CLAUDE_VARS = [
+    "CLAUDE_CODE_ENTRYPOINT",
+    "CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING",
+    "CLAUDE_AGENT_SDK_VERSION",
+    "ANTHROPIC_MODEL",
+    "ANTHROPIC_SMALL_FAST_MODEL",
+]
+
 
 class ConfigError(Exception):
     """配置错误"""
@@ -96,16 +107,7 @@ def build_coder_env(config: dict[str, Any]) -> dict[str, str]:
     env = os.environ.copy()
 
     # 清理父进程继承的干扰变量
-    # CLAUDE_CODE_ENTRYPOINT=claude-vscode 会导致 -p 模式下 API Key 被拒绝
-    # ANTHROPIC_MODEL/ANTHROPIC_SMALL_FAST_MODEL 会绕过别名映射，导致使用了错误的模型
-    _parent_vars_to_remove = [
-        "CLAUDE_CODE_ENTRYPOINT",
-        "CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING",
-        "CLAUDE_AGENT_SDK_VERSION",
-        "ANTHROPIC_MODEL",
-        "ANTHROPIC_SMALL_FAST_MODEL",
-    ]
-    for var in _parent_vars_to_remove:
+    for var in _PARENT_CLAUDE_VARS:
         env.pop(var, None)
 
     # API 认证：通过 ANTHROPIC_API_KEY（x-api-key 头）
@@ -126,6 +128,38 @@ def build_coder_env(config: dict[str, Any]) -> dict[str, str]:
     # 用户自定义的额外环境变量
     for key, value in coder_config.get("env", {}).items():
         env[key] = str(value)
+
+    return env
+
+
+def build_codex_env() -> dict[str, str]:
+    """构建 Codex 调用所需的环境变量
+
+    Codex 使用自身认证（codex login / OPENAI_API_KEY）和配置（~/.codex/config.toml），
+    不需要注入 API 密钥。主要目的是移除父进程 Claude Code 的干扰变量，
+    防止多实例运行时环境变量互相污染。
+
+    Returns:
+        干净的环境变量字典，用于 subprocess.Popen(env=...)
+    """
+    env = os.environ.copy()
+
+    # 移除父进程 Claude Code 干扰变量
+    for var in _PARENT_CLAUDE_VARS:
+        env.pop(var, None)
+
+    # 额外移除 Anthropic 认证变量，避免泄漏到 Codex（使用 OpenAI API）
+    _anthropic_credential_vars = [
+        "ANTHROPIC_API_KEY",
+        "ANTHROPIC_AUTH_TOKEN",
+        "ANTHROPIC_BASE_URL",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+        "CLAUDE_CODE_SUBAGENT_MODEL",
+    ]
+    for var in _anthropic_credential_vars:
+        env.pop(var, None)
 
     return env
 
@@ -233,6 +267,10 @@ def build_gemini_env() -> dict[str, str]:
     env = os.environ.copy()
     checked: list[str] = [str(p) for p in _gemini_env_candidates()]
 
+    # 清理父进程 Claude Code 干扰变量
+    for var in _PARENT_CLAUDE_VARS:
+        env.pop(var, None)
+
     # 从 ~/.gemini/.env 强制覆盖白名单键（不检查是否已存在）
     for key, value in _load_gemini_dotenv().items():
         if key in _GEMINI_ENV_KEYS:
@@ -248,18 +286,12 @@ def build_gemini_env() -> dict[str, str]:
 
 
 def ensure_gemini_env() -> None:
-    """Ensure Gemini API keys are in os.environ.
+    """已弃用：Gemini 环境变量现在通过 build_gemini_env() 按调用构建。
 
-    Reads from ~/.gemini/.env and injects whitelisted keys (GEMINI_API_KEY,
-    GOOGLE_API_KEY, GOOGLE_GEMINI_BASE_URL) into os.environ ONLY if they
-    are not already set. This allows the subprocess to inherit them naturally,
-    matching the Codex pattern (no custom env dict).
-
-    Args: none (config parameter removed — not used)
+    之前在 import 时注入 os.environ，会导致多实例间全局环境污染。
+    现在为 no-op，保留函数签名以保持向后兼容。
     """
-    for key, value in _load_gemini_dotenv().items():
-        if key in _GEMINI_ENV_KEYS and not os.environ.get(key):
-            os.environ[key] = value
+    pass
 
 
 def build_coder_settings_json(config: dict[str, Any]) -> str:

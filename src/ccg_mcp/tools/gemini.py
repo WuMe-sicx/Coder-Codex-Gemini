@@ -7,7 +7,9 @@ Gemini 是多面手，权限灵活，由 Claude 按场景控制。
 from __future__ import annotations
 
 import json
+import os
 import queue
+import signal
 import shutil
 import subprocess
 import sys
@@ -21,6 +23,39 @@ from typing import Annotated, Any, Dict, Generator, Iterator, List, Literal, Opt
 from pydantic import Field
 
 from ccg_mcp.config import build_gemini_env
+
+# 进程组隔离：子进程放入独立进程组，防止父进程信号泄漏和孤儿进程
+_POPEN_PROCESS_GROUP: dict[str, Any] = {"process_group": 0} if sys.platform != "win32" else {}
+
+
+def _terminate_process(process: subprocess.Popen) -> None:
+    """终止子进程及其整个进程组"""
+    if sys.platform == "win32":
+        process.terminate()
+        return
+    try:
+        pgid = os.getpgid(process.pid)
+        os.killpg(pgid, signal.SIGTERM)
+    except (ProcessLookupError, PermissionError, OSError):
+        try:
+            process.terminate()
+        except (ProcessLookupError, OSError):
+            pass
+
+
+def _kill_process(process: subprocess.Popen) -> None:
+    """强制杀死子进程及其整个进程组"""
+    if sys.platform == "win32":
+        process.kill()
+        return
+    try:
+        pgid = os.getpgid(process.pid)
+        os.killpg(pgid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError, OSError):
+        try:
+            process.kill()
+        except (ProcessLookupError, OSError):
+            pass
 
 
 # ============================================================================
@@ -192,6 +227,7 @@ def run_gemini_command(
         errors='replace',  # 处理非 UTF-8 字符，避免 UnicodeDecodeError
         env=env,
         cwd=str(cwd) if cwd else None,
+        **_POPEN_PROCESS_GROUP,
     )
 
     # 通过 stdin 传递 prompt，然后关闭 stdin
@@ -279,11 +315,11 @@ def run_gemini_command(
 
     # 如果超时，终止进程
     if timeout_error is not None:
-        process.terminate()
+        _terminate_process(process)
         try:
             process.wait(timeout=5)
         except subprocess.TimeoutExpired:
-            process.kill()
+            _kill_process(process)
             process.wait()
         thread.join(timeout=5)
         raise timeout_error
@@ -294,11 +330,11 @@ def run_gemini_command(
     except subprocess.TimeoutExpired:
         # 输出已完整获取，进程只是退出慢（Windows 常见）
         # 静默终止进程，不视为致命错误
-        process.terminate()
+        _terminate_process(process)
         try:
             process.wait(timeout=5)
         except subprocess.TimeoutExpired:
-            process.kill()
+            _kill_process(process)
             try:
                 process.wait(timeout=3)
             except subprocess.TimeoutExpired:
@@ -358,6 +394,7 @@ def safe_gemini_command(
         errors='replace',  # 处理非 UTF-8 字符，避免 UnicodeDecodeError
         env=env,
         cwd=str(cwd) if cwd else None,
+        **_POPEN_PROCESS_GROUP,
     )
 
     thread: Optional[threading.Thread] = None
@@ -371,14 +408,14 @@ def safe_gemini_command(
                 process.stdout.close()
         except (OSError, IOError):
             pass
-        # 2. 终止进程
+        # 2. 终止进程（含整个进程组）
         try:
             if process.poll() is None:
-                process.terminate()
+                _terminate_process(process)
                 try:
                     process.wait(timeout=5)
                 except subprocess.TimeoutExpired:
-                    process.kill()
+                    _kill_process(process)
                     try:
                         process.wait(timeout=2)  # kill 后也设超时
                     except subprocess.TimeoutExpired:
@@ -482,11 +519,11 @@ def safe_gemini_command(
             except subprocess.TimeoutExpired:
                 # 输出已完整获取，进程只是退出慢（Windows 常见）
                 # 静默终止进程，不视为致命错误
-                process.terminate()
+                _terminate_process(process)
                 try:
                     process.wait(timeout=5)
                 except subprocess.TimeoutExpired:
-                    process.kill()
+                    _kill_process(process)
                     try:
                         process.wait(timeout=3)
                     except subprocess.TimeoutExpired:

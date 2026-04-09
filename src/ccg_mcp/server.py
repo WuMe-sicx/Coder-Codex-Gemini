@@ -11,15 +11,12 @@ from typing import Annotated, Any, Dict, List, Literal, Optional
 from mcp.server.fastmcp import FastMCP
 from pydantic import Field
 
-from ccg_mcp.config import ensure_gemini_env
 from ccg_mcp.tools.coder import coder_tool
 from ccg_mcp.tools.codex import codex_tool
 from ccg_mcp.tools.gemini import gemini_tool
 
-# 预注入 Gemini API 密钥到 os.environ
-# Gemini CLI 在 cwd 存在 .env 文件时不会回退读取 ~/.gemini/.env，
-# 因此必须确保 GEMINI_API_KEY 在子进程环境变量中显式传递。
-ensure_gemini_env()
+# Gemini 环境变量已改为按调用构建（build_gemini_env()），不再全局注入 os.environ
+# 避免多实例运行时全局环境互相污染
 
 # 创建 MCP 服务器实例
 mcp = FastMCP("CCG-MCP Server")
