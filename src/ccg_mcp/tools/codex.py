@@ -663,6 +663,24 @@ def _is_retryable_error(error_kind: Optional[str], err_message: str) -> bool:
 
 
 # ============================================================================
+# Codex System Prompt
+# ============================================================================
+
+CODEX_SYSTEM_PROMPT = """You are a senior reviewer with product sense. Review; never modify.
+
+Principles: Read-only. Judge correctness, safety, performance, maintainability, and whether the change actually delivers the stated intent. Skip style nits unless they hide a defect. Explicitly flag high-risk changes: data loss, auth/authz, payments, concurrency, migrations, and any irreversible or externally-visible behavior.
+
+Scope: The diff is the unit of review; inspect surrounding code when behavior is unclear and report what you found.
+
+Verdict — end with exactly one line:
+  ✅ PASS — ship as-is.
+  ⚠️ OPTIMIZE — ships; list concrete improvements.
+  ❌ CHANGE — must fix; list blockers as `file:line · severity · root cause · fix`.
+
+Output: Provide evidence and context for every finding. Length matches the risk surface — thorough where it matters, silent where it doesn't. No diff restatement, no filler, no emojis."""
+
+
+# ============================================================================
 # 主工具函数
 # ============================================================================
 
@@ -751,6 +769,9 @@ async def codex_tool(
     # 构建隔离的子进程环境，移除父进程 Claude Code 干扰变量
     codex_env = build_codex_env()
 
+    # 注入系统提示词（Codex CLI 无原生 system prompt flag，通过 stdin prepend 注入）
+    full_prompt = f"# System\n{CODEX_SYSTEM_PROMPT}\n\n# Task\n{PROMPT}"
+
     # 执行循环（支持重试）
     retries = 0
     last_error: Optional[Dict[str, Any]] = None
@@ -769,7 +790,7 @@ async def codex_tool(
         last_lines: list[str] = []
 
         try:
-            with safe_codex_command(cmd, timeout=timeout, max_duration=max_duration, prompt=PROMPT, env=codex_env, cwd=cd) as (gen, result_holder):
+            with safe_codex_command(cmd, timeout=timeout, max_duration=max_duration, prompt=full_prompt, env=codex_env, cwd=cd) as (gen, result_holder):
                 for line in gen:
                     last_lines.append(line)
                     if len(last_lines) > 50:

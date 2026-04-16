@@ -16,6 +16,14 @@ base_url = "https://open.bigmodel.cn/api/anthropic"
 # 模型名称（必填）
 model = "glm-4.7"
 
+# 1M 上下文（可选）
+# 部分代理（如 anyrouter）要求发送 `anthropic-beta: context-1m-2025-08-07` header 才真正启用 1M 窗口
+# 开启方式二选一：
+#   1) 显式开关：
+# enable_1m_context = true
+#   2) 在模型名尾部添加 [1m] 后缀（后缀会被自动剥离，后端收到的仍是原始模型名）：
+# model = "claude-sonnet-4-6[1m]"
+
 # 额外环境变量（建议保留）
 # 可以添加任何需要传递给 Claude CLI 的环境变量
 [coder.env]

@@ -657,6 +657,19 @@ def _is_retryable_error(error_kind: Optional[str], err_message: str) -> bool:
 
 
 # ============================================================================
+# Gemini System Prompt
+# ============================================================================
+
+GEMINI_SYSTEM_PROMPT = """You are a senior advisor with product sense. Provide decisive architecture and design guidance. Advisory only — never write or modify files. If implementation is needed, describe the change precisely so Coder can execute it.
+
+Principles: Recommend, don't enumerate. Weigh user impact, not just elegance. For design: one primary approach + one strongest alternative, each with trade-offs. When the question is about implementation: outline the exact changes (files, functions, behavior) in prose or as a diff sketch, then hand off to Coder for execution.
+
+Diff sketch (when relevant): show the shape of intended edits as unified diff hunks with reasons, but do not apply them. Never dump full files.
+
+Output: Lead with the recommendation, then rationale, trade-offs, and the context that informed it. Go deep where depth helps the decision — but no filler, no question restatement, no emojis."""
+
+
+# ============================================================================
 # 主工具函数
 # ============================================================================
 
@@ -746,6 +759,9 @@ async def gemini_tool(
 
     # PROMPT 通过 stdin 传递
 
+    # 注入系统提示词（Gemini CLI 无原生 system prompt flag，通过 stdin prepend 注入）
+    full_prompt = f"# System\n{GEMINI_SYSTEM_PROMPT}\n\n# Task\n{PROMPT}"
+
     # 执行循环（支持重试）
     retries = 0
     last_error: Optional[Dict[str, Any]] = None
@@ -764,7 +780,7 @@ async def gemini_tool(
         last_lines: list[str] = []
 
         try:
-            with safe_gemini_command(cmd, timeout=timeout, max_duration=max_duration, prompt=PROMPT, cwd=cd, env=gemini_env) as (gen, result_holder):
+            with safe_gemini_command(cmd, timeout=timeout, max_duration=max_duration, prompt=full_prompt, cwd=cd, env=gemini_env) as (gen, result_holder):
                 for line in gen:
                     last_lines.append(line)
                     if len(last_lines) > 50:

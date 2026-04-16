@@ -92,6 +92,37 @@ CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1"
     )
 
 
+# 1M 上下文模型后缀（Claude CLI 识别此后缀后会自动附带 anthropic-beta: context-1m-2025-08-07 header）
+_CONTEXT_1M_SUFFIX = "[1m]"
+
+
+def _resolve_coder_model(coder_config: dict[str, Any]) -> str:
+    """解析最终要写入 ANTHROPIC_*_MODEL 的模型名
+
+    支持两种启用 1M 上下文的方式，最终都会让模型名带上 `[1m]` 后缀，
+    由 Claude CLI 自动注入 `anthropic-beta: context-1m-2025-08-07` header：
+
+    1. 显式配置 `enable_1m_context = true`（若 model 未带 [1m]，自动补齐）
+    2. 直接在 model 中使用 `[1m]` 后缀（保持原样）
+
+    Raises:
+        ConfigError: 去掉 [1m] 后模型名为空时抛出
+    """
+    model = coder_config.get("model", "")
+    enable_1m = bool(coder_config.get("enable_1m_context", False))
+
+    has_suffix = model.endswith(_CONTEXT_1M_SUFFIX)
+    base = model[: -len(_CONTEXT_1M_SUFFIX)] if has_suffix else model
+
+    if not base.strip():
+        raise ConfigError("Coder 配置的 model 去除 [1m] 后为空，请填写有效模型名")
+
+    # 启用 1M(显式 true 或 model 已带 [1m])时，统一让最终模型名带上 [1m] 后缀
+    if enable_1m or has_suffix:
+        return base + _CONTEXT_1M_SUFFIX
+    return base
+
+
 def build_coder_env(config: dict[str, Any]) -> dict[str, str]:
     """构建 Coder 调用所需的环境变量
 
@@ -102,7 +133,7 @@ def build_coder_env(config: dict[str, Any]) -> dict[str, str]:
         包含所有环境变量的字典
     """
     coder_config = config.get("coder", {})
-    model = coder_config.get("model", "")
+    model = _resolve_coder_model(coder_config)
 
     env = os.environ.copy()
 
@@ -119,14 +150,16 @@ def build_coder_env(config: dict[str, Any]) -> dict[str, str]:
         "https://open.bigmodel.cn/api/anthropic"
     )
 
-    # 所有模型别名都映射到配置的模型
+    # 所有模型别名都映射到配置的模型（若启用 1M，model 带 [1m] 后缀，CLI 会自动注入 beta header）
     env["ANTHROPIC_DEFAULT_OPUS_MODEL"] = model
     env["ANTHROPIC_DEFAULT_SONNET_MODEL"] = model
     env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = model
     env["CLAUDE_CODE_SUBAGENT_MODEL"] = model
 
-    # 用户自定义的额外环境变量
+    # 用户自定义的额外环境变量（会覆盖上面的默认值）
     for key, value in coder_config.get("env", {}).items():
+        if value is None:
+            continue
         env[key] = str(value)
 
     return env
@@ -310,29 +343,35 @@ def build_coder_settings_json(config: dict[str, Any]) -> str:
     import json
 
     coder_config = config.get("coder", {})
-    model = coder_config.get("model", "")
+    model = _resolve_coder_model(coder_config)
     api_token = coder_config.get("api_token", "")
 
-    settings = {
-        "env": {
-            "ANTHROPIC_API_KEY": api_token,
-            "ANTHROPIC_BASE_URL": coder_config.get(
-                "base_url",
-                "https://open.bigmodel.cn/api/anthropic"
-            ),
-            # 清空 AUTH_TOKEN 防止父进程的 token 干扰认证
-            "ANTHROPIC_AUTH_TOKEN": "",
-            # 设为空字符串强制 CLI 走默认模型路径，使其尊重 ANTHROPIC_DEFAULT_*_MODEL 别名
-            "ANTHROPIC_MODEL": "",
-            "ANTHROPIC_SMALL_FAST_MODEL": model,
-            "ANTHROPIC_DEFAULT_OPUS_MODEL": model,
-            "ANTHROPIC_DEFAULT_SONNET_MODEL": model,
-            "ANTHROPIC_DEFAULT_HAIKU_MODEL": model,
-            "CLAUDE_CODE_SUBAGENT_MODEL": model,
-        }
+    env_block: dict[str, str] = {
+        "ANTHROPIC_API_KEY": api_token,
+        "ANTHROPIC_BASE_URL": coder_config.get(
+            "base_url",
+            "https://open.bigmodel.cn/api/anthropic"
+        ),
+        # 清空 AUTH_TOKEN 防止父进程的 token 干扰认证
+        "ANTHROPIC_AUTH_TOKEN": "",
+        # 设为空字符串强制 CLI 走默认模型路径，使其尊重 ANTHROPIC_DEFAULT_*_MODEL 别名
+        "ANTHROPIC_MODEL": "",
+        "ANTHROPIC_SMALL_FAST_MODEL": model,
+        "ANTHROPIC_DEFAULT_OPUS_MODEL": model,
+        "ANTHROPIC_DEFAULT_SONNET_MODEL": model,
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL": model,
+        "CLAUDE_CODE_SUBAGENT_MODEL": model,
     }
 
-    return json.dumps(settings, ensure_ascii=False)
+    # 合并用户自定义 [coder.env]（用户值优先级更高，会覆盖上面的默认值）
+    # Claude CLI 加载 --settings 中的 env 块时会覆盖进程环境变量，
+    # 因此必须在这里合并，否则 [coder.env] 里的关键变量会被丢弃
+    for key, value in coder_config.get("env", {}).items():
+        if value is None:
+            continue
+        env_block[key] = str(value)
+
+    return json.dumps({"env": env_block}, ensure_ascii=False)
 
 
 def validate_config(config: dict[str, Any]) -> None:
