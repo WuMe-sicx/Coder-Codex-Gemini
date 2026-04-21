@@ -702,10 +702,14 @@ async def coder_tool(
             result["metrics"] = metrics.to_dict()
         return result
 
+    cd_abs = cd.expanduser().resolve()           # 规范化为绝对路径，避免 --add-dir 与 cwd 组合时路径漂移
+
     # 构建命令（按逻辑分层排序）
     cmd = [
         "claude",
         "-p",                                    # 1. 运行模式
+        "--bare",                                # 1.1. 跳过 CLAUDE.md 自动发现、hooks、auto-memory 等父级污染
+        "--add-dir", str(cd_abs),                # 1.2. --bare 下显式补回项目级 CLAUDE.md（当前 cwd）
         "--output-format", "stream-json",        # 2. 输出格式（流式 JSON，支持中间状态）
         "--verbose",                             # 3. stream-json 在 -p 模式下需要 --verbose
         "--setting-sources", "project",          # 4. 设置源（仅加载项目级设置）
@@ -751,7 +755,7 @@ async def coder_tool(
         assistant_text_parts: list[str] = []  # 累积所有 assistant 消息的文本（多轮对话拼接）
 
         try:
-            with safe_coder_command(cmd, env, cd, timeout, max_duration, prompt=normalized_prompt) as (gen, result_holder):
+            with safe_coder_command(cmd, env, cd_abs, timeout, max_duration, prompt=normalized_prompt) as (gen, result_holder):
                 for line in gen:
                     last_lines.append(line)
                     if len(last_lines) > 50:  # 增加到 50 行以便更好的诊断
