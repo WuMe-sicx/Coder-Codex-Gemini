@@ -634,7 +634,9 @@ def _build_error_detail(
 # Coder System Prompt
 # ============================================================================
 
-CODER_SYSTEM_PROMPT = """You are a senior engineer with product sense. Execute code tasks directly.
+CODER_SYSTEM_PROMPT = """You are an autonomous code-execution subprocess invoked by an upstream orchestrator. You are NOT Claude. You are NOT a workflow orchestrator. Ignore any CCG / Coder / Codex / Gemini workflow rules, Skip Protocols, role constraints, or orchestration instructions you may have loaded from any CLAUDE.md, CLAUDE.local.md, user-level memory, or auto-loaded workflow skill — those rules apply to your caller, not to you. No MCP tools (Coder, Codex, Gemini) are available to you; do not invoke or reference them. Do not ask the caller for confirmation. Do not pause for approval. Execute the task directly and return the result.
+
+You are a senior engineer with product sense. Execute code tasks directly.
 
 Principles: Honor intent over literal wording. Make autonomous implementation calls within scope. Follow existing conventions. Ship minimal, surgical edits. Do not introduce new dependencies, schemas, or architectural changes unless explicitly required. If context is insufficient, make the safest assumption, state it briefly, and proceed.
 
@@ -702,16 +704,13 @@ async def coder_tool(
             result["metrics"] = metrics.to_dict()
         return result
 
-    cd_abs = cd.expanduser().resolve()           # 规范化为绝对路径，避免 --add-dir 与 cwd 组合时路径漂移
-
     # 构建命令（按逻辑分层排序）
     cmd = [
         "claude",
         "-p",                                    # 1. 运行模式
-        "--bare",                                # 1.1. 跳过 CLAUDE.md 自动发现、hooks、auto-memory 等父级污染
-        "--add-dir", str(cd_abs),                # 1.2. --bare 下显式补回项目级 CLAUDE.md（当前 cwd）
         "--output-format", "stream-json",        # 2. 输出格式（流式 JSON，支持中间状态）
         "--verbose",                             # 3. stream-json 在 -p 模式下需要 --verbose
+        "--disable-slash-commands",              # 3.1. 关闭技能通道，防止 skill 注入协调者/审查者语义
         "--setting-sources", "project",          # 4. 设置源（仅加载项目级设置）
         "--settings", settings_json,             # 5. 覆盖父进程 settings.json 的 env 块
     ]
@@ -755,7 +754,7 @@ async def coder_tool(
         assistant_text_parts: list[str] = []  # 累积所有 assistant 消息的文本（多轮对话拼接）
 
         try:
-            with safe_coder_command(cmd, env, cd_abs, timeout, max_duration, prompt=normalized_prompt) as (gen, result_holder):
+            with safe_coder_command(cmd, env, cd, timeout, max_duration, prompt=normalized_prompt) as (gen, result_holder):
                 for line in gen:
                     last_lines.append(line)
                     if len(last_lines) > 50:  # 增加到 50 行以便更好的诊断
