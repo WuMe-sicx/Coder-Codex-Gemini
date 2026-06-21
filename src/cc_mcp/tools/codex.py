@@ -9,6 +9,7 @@ from __future__ import annotations
 import copy
 import json
 import time
+from collections import deque
 from pathlib import Path
 from typing import Annotated, Any, Dict, List, Literal, Optional
 
@@ -58,7 +59,7 @@ Output: Provide evidence and context for every finding. Length matches the risk 
 # 主工具函数
 # ============================================================================
 
-async def codex_tool(
+def codex_tool(
     PROMPT: Annotated[str, "审核任务描述"],
     cd: Annotated[Path, "工作目录"],
     sandbox: Annotated[
@@ -109,6 +110,8 @@ async def codex_tool(
 
     **注意**：Codex 仅审核，严禁修改代码，默认 sandbox 为 read-only
     **重试策略**：Codex 默认允许 1 次重试（只读操作无副作用）
+    **执行模型**：同步阻塞实现（子进程流式读取 + 退避 sleep），由 server.py
+    通过 asyncio.to_thread 放入工作线程调用，不要在事件循环里直接 await。
     """
     # 初始化指标收集器
     metrics = MetricsCollector(tool="codex", prompt=PROMPT, sandbox=sandbox)
@@ -160,14 +163,13 @@ async def codex_tool(
         raw_output_lines = 0
         json_decode_errors = 0
         error_kind: Optional[str] = None
-        last_lines: list[str] = []
+        # 只保留最后 50 行用于错误诊断；deque(maxlen) 自动淘汰，O(1) 入队
+        last_lines: deque[str] = deque(maxlen=50)
 
         try:
             with safe_codex_command(cmd, timeout=timeout, max_duration=max_duration, prompt=full_prompt, env=codex_env, cwd=cd) as (gen, result_holder):
                 for line in gen:
                     last_lines.append(line)
-                    if len(last_lines) > 50:
-                        last_lines.pop(0)
 
                     try:
                         line_dict = json.loads(line.strip())
@@ -259,7 +261,7 @@ async def codex_tool(
             err_message = str(e)
             success = False  # 明确设置为失败
             # 超时可以重试（Codex 只读）
-            all_last_lines = last_lines.copy()
+            all_last_lines = list(last_lines)
             last_error = {
                 "error_kind": error_kind,
                 "err_message": err_message,
@@ -305,7 +307,7 @@ async def codex_tool(
             break
         else:
             # 记录本轮失败信息
-            all_last_lines = last_lines.copy()
+            all_last_lines = list(last_lines)
             last_error = {
                 "error_kind": error_kind,
                 "err_message": err_message,

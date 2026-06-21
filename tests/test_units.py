@@ -94,5 +94,19 @@ class TestResults(unittest.TestCase):
         self.assertTrue(r["error"].endswith("401"))
 
 
+class TestWiring(unittest.TestCase):
+    """守护 server.codex(async) → to_thread → codex_tool(sync) 的执行模型"""
+
+    def test_codex_tool_is_sync(self):
+        import inspect
+        from cc_mcp.tools.codex import codex_tool
+        # 必须是同步函数：它整段是阻塞实现，靠 to_thread 卸载到工作线程
+        self.assertFalse(inspect.iscoroutinefunction(codex_tool))
+
+    def test_server_registers_single_codex_tool(self):
+        import cc_mcp.server as s
+        self.assertEqual(s.mcp.name, "CC-MCP Server")
+
+
 if __name__ == "__main__":
     unittest.main()

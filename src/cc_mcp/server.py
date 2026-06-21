@@ -6,6 +6,7 @@ Claude 负责写代码与自测，Codex 作为终审闸口。
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import Annotated, Any, Dict, List, Literal, Optional
 
@@ -57,8 +58,14 @@ async def codex(
     max_retries: Annotated[int, "最大重试次数"] = 1,
     log_metrics: Annotated[bool, "输出指标到 stderr"] = False,
 ) -> Dict[str, Any]:
-    """执行 Codex 代码审核"""
-    return await codex_tool(
+    """执行 Codex 代码审核
+
+    codex_tool 内部是同步阻塞实现（子进程流式读取 + 重试退避 sleep），
+    通过 asyncio.to_thread 放到工作线程执行，避免阻塞 FastMCP 事件循环
+    （否则一次数分钟的审查会让 stdio 传输层在整段时间内无响应）。
+    """
+    return await asyncio.to_thread(
+        codex_tool,
         PROMPT=PROMPT,
         cd=cd,
         sandbox=sandbox,
