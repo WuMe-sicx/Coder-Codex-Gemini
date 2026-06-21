@@ -64,7 +64,7 @@ Unit tests live in `tests/` (stdlib `unittest`, no extra deps) and cover the pur
 
 1. **Env isolation**: `config.py:build_codex_env()` copies `os.environ` and strips parent Claude Code interference vars (`CLAUDE_CODE_ENTRYPOINT`, `ANTHROPIC_*`, …) so Claude-side credentials never leak into the OpenAI-backed subprocess. This is the *only* job `config.py` has — there is no config file.
 2. **Command construction**: `codex exec --sandbox … --cd … --json`, plus optional `--image/--model/--profile/--yolo/--skip-git-repo-check`; `resume <SESSION_ID>` for multi-turn.
-3. **System prompt injection**: Codex CLI has no native system-prompt flag, so `CODEX_SYSTEM_PROMPT` is prepended to the user PROMPT over stdin (`# System … # Task …`). The prompt encodes the review checklist (correctness / boundaries / security / test gaps / maintainability) and the verdict format.
+3. **System prompt injection**: Codex CLI has no native system-prompt flag, so `CODEX_SYSTEM_PROMPT` is prepended to the user PROMPT over stdin (`# System … # Task …`). The prompt encodes the review checklist (correctness / boundaries / security / test gaps / maintainability), the Karpathy engineering guidelines (simplicity / surgical scope / explicit assumptions / verifiable success — so Codex reviews on the same bar the author writes under), and the verdict format.
 4. **Safe execution**: `safe_codex_command()` context manager wraps `subprocess.Popen(shell=False)` in its own process group, with a background stdout-reading thread feeding an output queue.
 5. **Stream parsing**: line-by-line JSONL extracts `thread_id` (the session id), `agent_message` text, and `fail`/`error` events.
 6. **Dual timeout**: idle timeout (no output, default 300s) + total duration cap (default 1800s).

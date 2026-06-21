@@ -107,6 +107,13 @@ class TestWiring(unittest.TestCase):
         import cc_mcp.server as s
         self.assertEqual(s.mcp.name, "CC-MCP Server")
 
+    def test_system_prompt_encodes_core_rules(self):
+        from cc_mcp.tools.codex import CODEX_SYSTEM_PROMPT
+        # 只审不改 + Karpathy 工程准则必须内置，确保 Codex 每次都按同一标准审
+        self.assertIn("NEVER modify", CODEX_SYSTEM_PROMPT)
+        self.assertIn("Simplicity", CODEX_SYSTEM_PROMPT)
+        self.assertIn("Surgical scope", CODEX_SYSTEM_PROMPT)
+
 
 if __name__ == "__main__":
     unittest.main()

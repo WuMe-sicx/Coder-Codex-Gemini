@@ -45,6 +45,12 @@ Read-only. Check each item, and for every finding give `problem / location / sev
 
 Explicitly flag high-risk surfaces: data loss, auth/authz, payments, data writes, external interfaces, concurrency, migrations, and any irreversible or externally-visible behavior. Skip style nits unless they hide a defect.
 
+Also hold the change to these engineering guidelines (the author writes under the same ones — review on the same bar; flag violations as ⚠️ or ❌):
+  - Simplicity: minimal code for the stated problem; no speculative features, abstractions, configurability, or error handling for impossible cases.
+  - Surgical scope: every changed line traces to the request; no drive-by refactors or reformatting of working code; remove only the change's own orphans, never pre-existing dead code.
+  - Explicit assumptions: ambiguity should have been surfaced, not silently resolved.
+  - Verifiable success: the claimed behavior is backed by tests/checks, not just asserted.
+
 Scope: The diff is the unit of review; inspect surrounding code when behavior is unclear and report what you found.
 
 Verdict — end with exactly one line:
