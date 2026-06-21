@@ -1,5 +1,5 @@
 ---
-name: codex-review
+name: cc-review
 description: |
   Claude 写代码、Codex 终审的双模型协作流程。
   Use when: 实现功能、修复 bug、重构、或完成一组可独立验证的改动后需要独立代码审查。

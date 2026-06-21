@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 CC (Claude + Codex) is a single-tool MCP server that lets Claude (the writer) hand a finished, self-tested change to **Codex** for independent final review. Codex reviews only — it never modifies code or files. Built with FastMCP, Python 3.12+, transport is stdio.
 
-The collaboration model is deliberately inverted from a prior 4-model design: **Claude writes and self-tests; Codex is the last gate and Claude must not self-approve.** See `需求文档.md` for the authoritative spec and `skills/codex-review/SKILL.md` for the working loop.
+The collaboration model is deliberately inverted from a prior 4-model design: **Claude writes and self-tests; Codex is the last gate and Claude must not self-approve.** See `需求文档.md` for the authoritative spec and `skills/cc-review/SKILL.md` for the working loop.
 
 ## Development Commands
 
@@ -78,7 +78,7 @@ The review ends with exactly one verdict line: `✅ PASS` / `⚠️ OPTIMIZE` / 
 
 ## Repo layout beyond `src/`
 
-- `skills/codex-review/` — the workflow skill installed into `~/.claude/skills` (SKILL.md + codex-guide.md + examples.md + constraint.md). This is the behavioral spec for how Claude should drive the review loop.
+- `skills/cc-review/` — the workflow skill installed into `~/.claude/skills` (SKILL.md + codex-guide.md + examples.md + constraint.md). This is the behavioral spec for how Claude should drive the review loop.
 - `templates/cc-global-prompt.md` — the `# CC Configuration` block appended to the user's global `~/.claude/CLAUDE.md` by setup.
 - `setup.*` / `uninstall.*` — three-platform installers (`.sh`, `.ps1`, `.bat`).
 

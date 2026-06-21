@@ -126,10 +126,10 @@ install_skill() {
     write_success "Installed $name skill"
 }
 
-install_skill "codex-review"
+install_skill "cc-review"
 
-# Remove skills from the old 4-model layout if present
-for old_skill in ccg-workflow gemini-collaboration; do
+# Remove skills from earlier layouts if present (codex-review = pre-rename name)
+for old_skill in codex-review ccg-workflow gemini-collaboration; do
     if [ -d "$SKILLS_DIR/$old_skill" ]; then
         rm -rf "$SKILLS_DIR/$old_skill"
         write_success "Removed legacy $old_skill skill"
@@ -169,5 +169,5 @@ echo "Next steps:"
 echo "  1. Make sure Codex is logged in:  codex login"
 echo "  2. Restart Claude Code CLI"
 echo "  3. Verify MCP server: claude mcp list"
-echo "  4. Check the skill: /codex-review"
+echo "  4. Check the skill: /cc-review"
 echo ""

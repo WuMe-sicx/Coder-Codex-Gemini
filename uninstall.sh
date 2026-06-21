@@ -85,8 +85,8 @@ write_step "Step 2: Removing Skills..."
 
 SKILLS_DIR="$HOME/.claude/skills"
 
-# codex-review is the current skill; ccg-workflow / gemini-collaboration are legacy.
-for skill in codex-review ccg-workflow gemini-collaboration; do
+# cc-review is the current skill; codex-review / ccg-workflow / gemini-collaboration are legacy.
+for skill in cc-review codex-review ccg-workflow gemini-collaboration; do
     if [ -d "$SKILLS_DIR/$skill" ]; then
         rm -rf "$SKILLS_DIR/$skill"
         write_success "Removed $skill skill"

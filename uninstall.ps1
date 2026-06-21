@@ -1,5 +1,5 @@
 # CC Uninstall Script for Windows
-# Removes the cc MCP server, the codex-review skill, and any legacy 4-model layout.
+# Removes the cc MCP server, the cc-review skill, and any legacy layout.
 
 # Force UTF-8 encoding for file operations
 $PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'
@@ -73,13 +73,13 @@ if (!(Test-Path $settingsPath)) {
 }
 
 # ==============================================================================
-# Step 2: Remove Skills (current codex-review + legacy skills)
+# Step 2: Remove Skills (current cc-review + legacy skills)
 # ==============================================================================
 Write-Step "Step 2: Removing Skills..."
 
 $skillsDir = "$env:USERPROFILE\.claude\skills"
 
-foreach ($skill in @("codex-review", "ccg-workflow", "gemini-collaboration")) {
+foreach ($skill in @("cc-review", "codex-review", "ccg-workflow", "gemini-collaboration")) {
     $path = "$skillsDir\$skill"
     if (Test-Path $path) {
         Remove-Item -Recurse -Force $path

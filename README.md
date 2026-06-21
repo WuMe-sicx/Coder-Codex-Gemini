@@ -62,7 +62,7 @@ cd Coder-Codex-Gemini
 powershell -ExecutionPolicy Bypass -File setup.ps1
 ```
 
-setup 会：安装依赖 → 注册 MCP 服务器（名为 `cc`）→ 安装 `codex-review` skill → 把协作协议追加到全局 `~/.claude/CLAUDE.md`。
+setup 会：安装依赖 → 注册 MCP 服务器（名为 `cc`）→ 安装 `cc-review` skill → 把协作协议追加到全局 `~/.claude/CLAUDE.md`。
 
 ### 手动注册
 
@@ -152,7 +152,7 @@ Claude 拆解需求
 **结论**以一行收尾：`✅ PASS`（通过）/ `⚠️ OPTIMIZE`（可合入，附建议）/ `❌ CHANGE`（必须修复）。
 
 失败时返回 `error` / `error_kind` / `error_detail`，`error_kind` 取值见
-[skills/codex-review/codex-guide.md](skills/codex-review/codex-guide.md)。
+[skills/cc-review/codex-guide.md](skills/cc-review/codex-guide.md)。
 
 ---
 
@@ -178,7 +178,7 @@ src/cc_mcp/
 ├── server.py         # 注册唯一的 codex 工具
 ├── config.py         # 仅 build_codex_env()：清理子进程环境
 └── tools/codex.py    # Codex 子进程执行、流式解析、重试、结构化错误
-skills/codex-review/  # 安装到 ~/.claude/skills 的协作流程 skill
+skills/cc-review/      # 安装到 ~/.claude/skills 的协作流程 skill
 templates/cc-global-prompt.md   # 追加到全局 CLAUDE.md 的协作协议
 setup.* / uninstall.*           # 三平台安装/卸载脚本
 需求文档.md            # 双模型方案的权威规格

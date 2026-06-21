@@ -62,7 +62,7 @@ cd Coder-Codex-Gemini
 powershell -ExecutionPolicy Bypass -File setup.ps1
 ```
 
-Setup will: install deps → register the MCP server (named `cc`) → install the `codex-review` skill → append the collaboration protocol to your global `~/.claude/CLAUDE.md`.
+Setup will: install deps → register the MCP server (named `cc`) → install the `cc-review` skill → append the collaboration protocol to your global `~/.claude/CLAUDE.md`.
 
 ### Manual registration
 
@@ -152,7 +152,7 @@ The server exposes exactly **one** MCP tool: `codex`.
 The verdict ends with one line: `✅ PASS` / `⚠️ OPTIMIZE` (ships, with suggestions) / `❌ CHANGE` (must fix).
 
 On failure it returns `error` / `error_kind` / `error_detail`; the `error_kind` values are listed in
-[skills/codex-review/codex-guide.md](skills/codex-review/codex-guide.md).
+[skills/cc-review/codex-guide.md](skills/cc-review/codex-guide.md).
 
 ---
 
@@ -178,7 +178,7 @@ src/cc_mcp/
 ├── server.py         # registers the single codex tool
 ├── config.py         # build_codex_env() only: clean subprocess env
 └── tools/codex.py    # Codex subprocess exec, stream parsing, retries, structured errors
-skills/codex-review/  # the collaboration skill installed to ~/.claude/skills
+skills/cc-review/      # the collaboration skill installed to ~/.claude/skills
 templates/cc-global-prompt.md   # protocol appended to the global CLAUDE.md
 setup.* / uninstall.*           # three-platform installers
 需求文档.md            # the authoritative spec (Chinese)

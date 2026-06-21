@@ -237,17 +237,17 @@ Write-Success "MCP configuration generated"
 Write-Step "Step 4: Installing Skill..."
 
 $skillsDir = "$env:USERPROFILE\.claude\skills"
-$codexReviewSource = Join-Path $PSScriptRoot "skills\codex-review"
+$ccReviewSource = Join-Path $PSScriptRoot "skills\cc-review"
 
 if ($DryRun) {
     if (!(Test-Path $skillsDir)) {
         Write-DryRun "Would create directory: $skillsDir"
     }
-    if (Test-Path $codexReviewSource) {
-        Write-DryRun "Would copy: $codexReviewSource -> $skillsDir\codex-review"
-        Write-Success "codex-review skill would be installed"
+    if (Test-Path $ccReviewSource) {
+        Write-DryRun "Would copy: $ccReviewSource -> $skillsDir\cc-review"
+        Write-Success "cc-review skill would be installed"
     } else {
-        Write-WarningMsg "codex-review skill not found, would skip"
+        Write-WarningMsg "cc-review skill not found, would skip"
     }
 } else {
     try {
@@ -256,19 +256,19 @@ if ($DryRun) {
             Write-Success "Created skills directory: $skillsDir"
         }
 
-        if (Test-Path $codexReviewSource) {
-            $dest = "$skillsDir\codex-review"
+        if (Test-Path $ccReviewSource) {
+            $dest = "$skillsDir\cc-review"
             if (Test-Path $dest) {
                 Remove-Item -Recurse -Force $dest
             }
-            Copy-Item -Recurse $codexReviewSource $dest
-            Write-Success "Installed codex-review skill"
+            Copy-Item -Recurse $ccReviewSource $dest
+            Write-Success "Installed cc-review skill"
         } else {
-            Write-WarningMsg "codex-review skill not found, skipping"
+            Write-WarningMsg "cc-review skill not found, skipping"
         }
 
-        # Remove skills from the old 4-model layout if present
-        foreach ($oldSkill in @("ccg-workflow", "gemini-collaboration")) {
+        # Remove skills from earlier layouts if present (codex-review = pre-rename name)
+        foreach ($oldSkill in @("codex-review", "ccg-workflow", "gemini-collaboration")) {
             $oldPath = "$skillsDir\$oldSkill"
             if (Test-Path $oldPath) {
                 Remove-Item -Recurse -Force $oldPath
@@ -365,6 +365,6 @@ if ($DryRun) {
     Write-Host "  1. Make sure Codex is logged in: codex login" -ForegroundColor White
     Write-Host "  2. Restart Claude Code CLI" -ForegroundColor White
     Write-Host "  3. Verify MCP server: claude mcp list" -ForegroundColor White
-    Write-Host "  4. Check the skill: /codex-review" -ForegroundColor White
+    Write-Host "  4. Check the skill: /cc-review" -ForegroundColor White
 }
 Write-Host ""

@@ -3,7 +3,7 @@
 ---
 
 ## Communication
-* 完成可独立验证的改动后，按 codex-review 流程送 Codex 终审
+* 完成可独立验证的改动后，按 cc-review 流程送 Codex 终审
 * 所有关键操作必须具备可追溯记录（SESSION_ID / 变更记录）
 ### Failover（必须具备）
 当 Codex 审查工具不可用：
