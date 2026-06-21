@@ -44,13 +44,18 @@ No test suite or linter is configured. Codex authenticates through its own CLI (
 
 ### The one MCP tool
 
-`server.py` registers a single async tool, `codex`, which delegates to `tools/codex.py:codex_tool()`. That module builds a `codex exec` subprocess command, streams its JSONL output, parses session id / agent text / errors, handles retries, and returns a structured dict.
+`server.py` registers a single async tool, `codex`, which delegates to `tools/codex.py:codex_tool()`. The tool layer is split into focused modules (each ≤300 lines):
+
+- `tools/codex.py` — `CODEX_SYSTEM_PROMPT` + the `codex_tool()` orchestration loop (build command → stream → parse → retry → assemble result).
+- `tools/process.py` — `safe_codex_command()` context manager, process-group helpers, dual-timeout streaming.
+- `tools/errors.py` — exceptions, `ErrorKind`, `_build_error_detail`, auth/retry/reconnect predicates.
+- `tools/metrics.py` — `MetricsCollector`.
 
 | Tool | CLI invoked | Default sandbox | Default retries | Side effects |
 |------|-------------|-----------------|-----------------|--------------|
 | `codex` | `codex` (OpenAI Codex CLI) | `read-only` | 1 (safe) | No |
 
-### Subprocess execution pattern (tools/codex.py)
+### Subprocess execution pattern (tools/process.py + codex.py)
 
 1. **Env isolation**: `config.py:build_codex_env()` copies `os.environ` and strips parent Claude Code interference vars (`CLAUDE_CODE_ENTRYPOINT`, `ANTHROPIC_*`, …) so Claude-side credentials never leak into the OpenAI-backed subprocess. This is the *only* job `config.py` has — there is no config file.
 2. **Command construction**: `codex exec --sandbox … --cd … --json`, plus optional `--image/--model/--profile/--yolo/--skip-git-repo-check`; `resume <SESSION_ID>` for multi-turn.
@@ -79,7 +84,7 @@ The review ends with exactly one verdict line: `✅ PASS` / `⚠️ OPTIMIZE` / 
 
 ## Code conventions
 
-- Python 3.12+ with type hints; async tool handler in `server.py`, sync internals in `tools/codex.py`.
+- Python 3.12+ with type hints; async tool handler in `server.py`, sync internals split across `tools/{codex,process,errors,metrics}.py` (one concern per file, ≤300 lines).
 - Tool params use `Annotated[type, Field(...)]` for MCP schema generation.
 - Chinese comments and docstrings throughout.
 - Error handling uses `CommandTimeoutError` / `CommandNotFoundError` and the `ErrorKind` string constants — never swallow exceptions silently.

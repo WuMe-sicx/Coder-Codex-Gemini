@@ -1,665 +1,31 @@
 """Codex 工具实现
 
-调用 Codex 进行代码审核。
-复用 CodexMCP 的核心逻辑。
+调用 Codex 进行独立代码审查（只审不改）。
+子进程执行/超时/清理见 process.py，错误与指标见 errors.py / metrics.py。
 """
 
 from __future__ import annotations
 
+import copy
 import json
-import os
-import queue
-import re
-import signal
-import shutil
-import subprocess
-import sys
-import threading
 import time
-from contextlib import contextmanager
-from datetime import datetime, timezone
 from pathlib import Path
-from typing import Annotated, Any, Dict, Generator, Iterator, List, Literal, Optional
+from typing import Annotated, Any, Dict, List, Literal, Optional
 
 from pydantic import Field
 
 from cc_mcp.config import build_codex_env
-
-# 进程组隔离：子进程放入独立进程组，防止父进程信号泄漏和孤儿进程
-_POPEN_PROCESS_GROUP: dict[str, Any] = {"process_group": 0} if sys.platform != "win32" else {}
-
-
-def _terminate_process(process: subprocess.Popen) -> None:
-    """终止子进程及其整个进程组"""
-    if sys.platform == "win32":
-        process.terminate()
-        return
-    try:
-        pgid = os.getpgid(process.pid)
-        os.killpg(pgid, signal.SIGTERM)
-    except (ProcessLookupError, PermissionError, OSError):
-        try:
-            process.terminate()
-        except (ProcessLookupError, OSError):
-            pass
-
-
-def _kill_process(process: subprocess.Popen) -> None:
-    """强制杀死子进程及其整个进程组"""
-    if sys.platform == "win32":
-        process.kill()
-        return
-    try:
-        pgid = os.getpgid(process.pid)
-        os.killpg(pgid, signal.SIGKILL)
-    except (ProcessLookupError, PermissionError, OSError):
-        try:
-            process.kill()
-        except (ProcessLookupError, OSError):
-            pass
-
-
-# ============================================================================
-# 错误类型定义
-# ============================================================================
-
-class CommandNotFoundError(Exception):
-    """命令不存在错误"""
-    pass
-
-
-class CommandTimeoutError(Exception):
-    """命令执行超时错误"""
-    def __init__(self, message: str, is_idle: bool = False):
-        super().__init__(message)
-        self.is_idle = is_idle  # 标记是否为空闲超时
-
-
-# ============================================================================
-# 错误类型枚举
-# ============================================================================
-
-class ErrorKind:
-    """结构化错误类型枚举"""
-    TIMEOUT = "timeout"  # 总时长超时
-    IDLE_TIMEOUT = "idle_timeout"  # 空闲超时（无输出）
-    COMMAND_NOT_FOUND = "command_not_found"
-    UPSTREAM_ERROR = "upstream_error"
-    AUTH_REQUIRED = "auth_required"  # 需要登录认证
-    JSON_DECODE = "json_decode"
-    PROTOCOL_MISSING_SESSION = "protocol_missing_session"
-    EMPTY_RESULT = "empty_result"
-    SUBPROCESS_ERROR = "subprocess_error"
-    UNEXPECTED_EXCEPTION = "unexpected_exception"
-
-
-# ============================================================================
-# 指标收集
-# ============================================================================
-
-class MetricsCollector:
-    """指标收集器"""
-
-    def __init__(self, tool: str, prompt: str, sandbox: str):
-        self.tool = tool
-        self.sandbox = sandbox
-        self.prompt_chars = len(prompt)
-        self.prompt_lines = prompt.count('\n') + 1
-        self.ts_start = datetime.now(timezone.utc)
-        self.ts_end: Optional[datetime] = None
-        self.duration_ms: int = 0
-        self.success: bool = False
-        self.error_kind: Optional[str] = None
-        self.retries: int = 0
-        self.exit_code: Optional[int] = None
-        self.result_chars: int = 0
-        self.result_lines: int = 0
-        self.raw_output_lines: int = 0
-        self.json_decode_errors: int = 0
-
-    def finish(
-        self,
-        success: bool,
-        error_kind: Optional[str] = None,
-        result: str = "",
-        exit_code: Optional[int] = None,
-        raw_output_lines: int = 0,
-        json_decode_errors: int = 0,
-        retries: int = 0,
-    ) -> None:
-        """完成指标收集"""
-        self.ts_end = datetime.now(timezone.utc)
-        self.duration_ms = int((self.ts_end - self.ts_start).total_seconds() * 1000)
-        self.success = success
-        self.error_kind = error_kind
-        self.result_chars = len(result)
-        self.result_lines = result.count('\n') + 1 if result else 0
-        self.exit_code = exit_code
-        self.raw_output_lines = raw_output_lines
-        self.json_decode_errors = json_decode_errors
-        self.retries = retries
-
-    def to_dict(self) -> Dict[str, Any]:
-        """转换为字典"""
-        return {
-            "ts_start": self.ts_start.isoformat() if self.ts_start else None,
-            "ts_end": self.ts_end.isoformat() if self.ts_end else None,
-            "duration_ms": self.duration_ms,
-            "tool": self.tool,
-            "sandbox": self.sandbox,
-            "success": self.success,
-            "error_kind": self.error_kind,
-            "retries": self.retries,
-            "exit_code": self.exit_code,
-            "prompt_chars": self.prompt_chars,
-            "prompt_lines": self.prompt_lines,
-            "result_chars": self.result_chars,
-            "result_lines": self.result_lines,
-            "raw_output_lines": self.raw_output_lines,
-            "json_decode_errors": self.json_decode_errors,
-        }
-
-    def format_duration(self) -> str:
-        """格式化耗时为 "xmxs" 格式"""
-        total_seconds = self.duration_ms // 1000
-        minutes = total_seconds // 60
-        seconds = total_seconds % 60
-        return f"{minutes}m{seconds}s"
-
-    def log_to_stderr(self) -> None:
-        """将指标输出到 stderr（JSONL 格式）"""
-        metrics = self.to_dict()
-        # 移除 None 值以减少输出
-        metrics = {k: v for k, v in metrics.items() if v is not None}
-        try:
-            print(json.dumps(metrics, ensure_ascii=False), file=sys.stderr)
-        except Exception:
-            pass  # 静默失败，不影响主流程
-
-
-# ============================================================================
-# 命令执行
-# ============================================================================
-
-def run_codex_command(
-    cmd: list[str],
-    timeout: int = 300,
-    max_duration: int = 1800,
-    prompt: str = "",
-    env: dict[str, str] | None = None,
-    cwd: Path | None = None,
-) -> Generator[str, None, tuple[Optional[int], int]]:
-    """执行 Codex 命令并流式返回输出
-
-    Args:
-        cmd: 命令和参数列表
-        timeout: 空闲超时（秒），无输出超过此时间触发超时，默认 300 秒（5 分钟）
-        max_duration: 总时长硬上限（秒），默认 1800 秒（30 分钟），0 表示无限制
-        prompt: 通过 stdin 传递的 prompt 内容
-        env: 子进程环境变量字典，None 则继承父进程环境
-        cwd: 子进程工作目录
-
-    Yields:
-        输出行
-
-    Returns:
-        (exit_code, raw_output_lines) 元组
-
-    Raises:
-        CommandNotFoundError: codex CLI 未安装时抛出
-        CommandTimeoutError: 命令执行超时时抛出
-    """
-    codex_path = shutil.which('codex')
-    if not codex_path:
-        raise CommandNotFoundError(
-            "未找到 codex CLI。请确保已安装 Codex CLI 并添加到 PATH。\n"
-            "安装指南：https://developers.openai.com/codex/quickstart"
-        )
-    popen_cmd = cmd.copy()
-    popen_cmd[0] = codex_path
-
-    process = subprocess.Popen(
-        popen_cmd,
-        shell=False,
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        universal_newlines=True,
-        encoding='utf-8',
-        errors='replace',  # 处理非 UTF-8 字符，避免 UnicodeDecodeError
-        env=env,
-        cwd=str(cwd) if cwd else None,
-        **_POPEN_PROCESS_GROUP,
-    )
-
-    # 通过 stdin 传递 prompt，然后关闭 stdin
-    if process.stdin:
-        try:
-            if prompt:
-                process.stdin.write(prompt)
-        except (BrokenPipeError, OSError):
-            # 子进程可能已退出，忽略写入错误
-            pass
-        finally:
-            try:
-                process.stdin.close()
-            except (BrokenPipeError, OSError):
-                pass
-
-    output_queue: queue.Queue[str | None] = queue.Queue()
-    raw_output_lines = 0
-    GRACEFUL_SHUTDOWN_DELAY = 0.3
-
-    def is_turn_completed(line: str) -> bool:
-        """检查是否回合完成"""
-        try:
-            data = json.loads(line)
-            return data.get("type") == "turn.completed"
-        except (json.JSONDecodeError, AttributeError, TypeError):
-            return False
-
-    def read_output() -> None:
-        """在单独线程中读取进程输出"""
-        nonlocal raw_output_lines
-        if process.stdout:
-            for line in iter(process.stdout.readline, ""):
-                stripped = line.strip()
-                # 任意行都入队（触发活动判定），但只计数非空行
-                output_queue.put(stripped)
-                if stripped:
-                    raw_output_lines += 1
-                if is_turn_completed(stripped):
-                    # 等待剩余输出被 drain
-                    time.sleep(GRACEFUL_SHUTDOWN_DELAY)
-                    break
-            process.stdout.close()
-        output_queue.put(None)
-
-    thread = threading.Thread(target=read_output)
-    thread.start()
-
-    # 持续读取输出，带双重超时保障
-    start_time = time.time()
-    last_activity_time = time.time()
-    timeout_error: CommandTimeoutError | None = None
-
-    while True:
-        now = time.time()
-
-        # 检查总时长硬上限（优先级高）
-        if max_duration > 0 and (now - start_time) >= max_duration:
-            timeout_error = CommandTimeoutError(
-                f"codex 执行超时（总时长超过 {max_duration}s），进程已终止。",
-                is_idle=False
-            )
-            break
-
-        # 检查空闲超时
-        if (now - last_activity_time) >= timeout:
-            timeout_error = CommandTimeoutError(
-                f"codex 空闲超时（{timeout}s 无输出），进程已终止。",
-                is_idle=True
-            )
-            break
-
-        try:
-            line = output_queue.get(timeout=0.5)
-            if line is None:
-                break
-            # 有输出（包括空行），重置空闲计时器
-            last_activity_time = time.time()
-            if line:  # 非空行才 yield
-                yield line
-        except queue.Empty:
-            if process.poll() is not None and not thread.is_alive():
-                break
-
-    # 如果超时，终止进程
-    if timeout_error is not None:
-        _terminate_process(process)
-        try:
-            process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            _kill_process(process)
-            process.wait()
-        thread.join(timeout=5)
-        raise timeout_error
-
-    exit_code: Optional[int] = None
-    try:
-        exit_code = process.wait(timeout=15)
-    except subprocess.TimeoutExpired:
-        # 输出已完整获取，进程只是退出慢（Windows 常见）
-        # 静默终止进程，不视为致命错误
-        _terminate_process(process)
-        try:
-            process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            _kill_process(process)
-            try:
-                process.wait(timeout=3)
-            except subprocess.TimeoutExpired:
-                pass  # 极端情况：进程无法终止，放弃
-    finally:
-        thread.join(timeout=5)
-
-    # 读取剩余输出（不再累加 raw_output_lines，避免重复计数）
-    while not output_queue.empty():
-        try:
-            line = output_queue.get_nowait()
-            if line is not None:
-                yield line
-        except queue.Empty:
-            break
-
-    # 返回退出码和原始输出行数
-    return (exit_code, raw_output_lines)
-
-
-@contextmanager
-def safe_codex_command(
-    cmd: list[str],
-    timeout: int = 300,
-    max_duration: int = 1800,
-    prompt: str = "",
-    env: dict[str, str] | None = None,
-    cwd: Path | None = None,
-) -> Iterator[tuple[Generator[str, None, None], Dict[str, Any]]]:
-    """安全执行 Codex 命令的上下文管理器
-
-    确保在任何情况下（包括异���）都能正确清理子进程。
-
-    用法:
-        with safe_codex_command(cmd, timeout, max_duration, prompt) as (gen, result_holder):
-            for line in gen:
-                process_line(line)
-            exit_code = result_holder["exit_code"]
-    """
-    codex_path = shutil.which('codex')
-    if not codex_path:
-        raise CommandNotFoundError(
-            "未找到 codex CLI。请确保已安装 Codex CLI 并添加到 PATH。\n"
-            "安装指南：https://developers.openai.com/codex/quickstart"
-        )
-    popen_cmd = cmd.copy()
-    popen_cmd[0] = codex_path
-
-    process = subprocess.Popen(
-        popen_cmd,
-        shell=False,
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        universal_newlines=True,
-        encoding='utf-8',
-        errors='replace',  # 处理非 UTF-8 字符，避免 UnicodeDecodeError
-        env=env,
-        cwd=str(cwd) if cwd else None,
-        **_POPEN_PROCESS_GROUP,
-    )
-
-    thread: Optional[threading.Thread] = None
-
-    def cleanup() -> None:
-        """清理子进程和线程（best-effort，不抛异常）"""
-        nonlocal thread
-        # 1. 先关闭 stdout 以解除读取线程的阻塞
-        try:
-            if process.stdout and not process.stdout.closed:
-                process.stdout.close()
-        except (OSError, IOError):
-            pass
-        # 2. 终止进程（含整个进程组）
-        try:
-            if process.poll() is None:
-                _terminate_process(process)
-                try:
-                    process.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    _kill_process(process)
-                    try:
-                        process.wait(timeout=2)  # kill 后也设超时
-                    except subprocess.TimeoutExpired:
-                        pass  # 极端情况：进程无法终止，放弃
-        except (ProcessLookupError, OSError):
-            pass  # 进程已退出，忽略
-        # 3. 等待线程结束
-        if thread is not None and thread.is_alive():
-            thread.join(timeout=5)
-
-    try:
-        # 通过 stdin 传递 prompt，然后关闭 stdin
-        if process.stdin:
-            try:
-                if prompt:
-                    process.stdin.write(prompt)
-            except (BrokenPipeError, OSError):
-                pass
-            finally:
-                try:
-                    process.stdin.close()
-                except (BrokenPipeError, OSError):
-                    pass
-
-        output_queue: queue.Queue[str | None] = queue.Queue()
-        raw_output_lines_holder = [0]
-        result_holder: Dict[str, Any] = {"exit_code": None, "raw_output_lines": 0}
-        GRACEFUL_SHUTDOWN_DELAY = 0.3
-
-        def is_turn_completed(line: str) -> bool:
-            """检查是否回合完成"""
-            try:
-                data = json.loads(line)
-                return data.get("type") == "turn.completed"
-            except (json.JSONDecodeError, AttributeError, TypeError):
-                return False
-
-        def read_output() -> None:
-            """在单独线程中读取进程输出"""
-            try:
-                if process.stdout:
-                    for line in iter(process.stdout.readline, ""):
-                        stripped = line.strip()
-                        output_queue.put(stripped)
-                        if stripped:
-                            raw_output_lines_holder[0] += 1
-                        if is_turn_completed(stripped):
-                            time.sleep(GRACEFUL_SHUTDOWN_DELAY)
-                            break
-                    process.stdout.close()
-            except (OSError, IOError, ValueError):
-                pass  # stdout 被关闭，正常退出
-            finally:
-                output_queue.put(None)  # 确保投递哨兵
-
-        thread = threading.Thread(target=read_output, daemon=True)
-        thread.start()
-
-        def generator() -> Generator[str, None, None]:
-            """生成器：读取输出并处理超时"""
-            nonlocal thread
-            start_time = time.time()
-            last_activity_time = time.time()
-            timeout_error: CommandTimeoutError | None = None
-
-            while True:
-                now = time.time()
-
-                if max_duration > 0 and (now - start_time) >= max_duration:
-                    timeout_error = CommandTimeoutError(
-                        f"codex 执行超时（总时长超过 {max_duration}s），进程已终止。",
-                        is_idle=False
-                    )
-                    break
-
-                if (now - last_activity_time) >= timeout:
-                    timeout_error = CommandTimeoutError(
-                        f"codex 空闲超时（{timeout}s 无输出），进程已终止。",
-                        is_idle=True
-                    )
-                    break
-
-                try:
-                    line = output_queue.get(timeout=0.5)
-                    if line is None:
-                        break
-                    last_activity_time = time.time()
-                    if line:
-                        yield line
-                except queue.Empty:
-                    if process.poll() is not None and not thread.is_alive():
-                        break
-
-            if timeout_error is not None:
-                cleanup()
-                raise timeout_error
-
-            exit_code: Optional[int] = None
-            try:
-                exit_code = process.wait(timeout=15)
-            except subprocess.TimeoutExpired:
-                # 输出已完整获取，进程只是退出慢（Windows 常见）
-                # 静默终止进程，不视为致命错误
-                _terminate_process(process)
-                try:
-                    process.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    _kill_process(process)
-                    try:
-                        process.wait(timeout=3)
-                    except subprocess.TimeoutExpired:
-                        pass  # 极端情况：进程无法终止，放弃
-            finally:
-                if thread is not None:
-                    thread.join(timeout=5)
-
-            while not output_queue.empty():
-                try:
-                    line = output_queue.get_nowait()
-                    if line is not None:
-                        yield line
-                except queue.Empty:
-                    break
-
-            result_holder["exit_code"] = exit_code
-            result_holder["raw_output_lines"] = raw_output_lines_holder[0]
-
-        yield generator(), result_holder
-
-    except Exception:
-        cleanup()
-        raise
-    finally:
-        cleanup()
-
-
-def _filter_last_lines(lines: list[str], max_lines: int = 50) -> list[str]:
-    """过滤 last_lines，脱敏 tool_result 中的大内容
-
-    Codex 的 JSONL 格式：tool_result 在 item.type 中。
-    这里只脱敏 tool_result 的 content 字段，保留消息结构和所有其他上下文。
-    """
-    import copy
-    filtered = []
-    for line in lines:
-        try:
-            data = json.loads(line)
-            item = data.get("item", {})
-
-            # 脱敏 tool_result 内容
-            if item.get("type") == "tool_result":
-                data = copy.deepcopy(data)
-                if "content" in data["item"]:
-                    data["item"]["content"] = "[truncated]"
-                filtered.append(json.dumps(data, ensure_ascii=False))
-                continue
-
-            # 其他消息类型正常保留
-            filtered.append(line)
-        except (json.JSONDecodeError, TypeError, AttributeError):
-            # 非 JSON 行正常保留
-            filtered.append(line)
-
-    return filtered[-max_lines:]
-
-
-def _build_error_detail(
-    message: str,
-    exit_code: Optional[int] = None,
-    last_lines: Optional[list[str]] = None,
-    json_decode_errors: int = 0,
-    idle_timeout_s: Optional[int] = None,
-    max_duration_s: Optional[int] = None,
-    retries: int = 0,
-) -> Dict[str, Any]:
-    """构建结构化错误详情"""
-    detail: Dict[str, Any] = {"message": message}
-    if exit_code is not None:
-        detail["exit_code"] = exit_code
-    if last_lines:
-        detail["last_lines"] = _filter_last_lines(last_lines, max_lines=50)
-    if json_decode_errors > 0:
-        detail["json_decode_errors"] = json_decode_errors
-    if idle_timeout_s is not None:
-        detail["idle_timeout_s"] = idle_timeout_s
-        detail["suggestion"] = (
-            "任务空闲超时（无输出）。建议：1) 增加 timeout 参数 "
-            "2) 检查任务是否卡住 3) 拆分为更小的子任务"
-        )
-    if max_duration_s is not None:
-        detail["max_duration_s"] = max_duration_s
-        detail["suggestion"] = (
-            "任务总时长超时。建议：1) 增加 max_duration 参数 "
-            "2) 拆分为更小的子任务 3) 检查是否存在死循环"
-        )
-    if retries > 0:
-        detail["retries"] = retries
-    return detail
-
-
-# ============================================================================
-# 可重试错误判断
-# ============================================================================
-
-def _is_auth_error(text: str) -> bool:
-    """检测是否为认证错误
-
-    检测以下特征字符串（不区分大小写）：
-    - 401
-    - unauthorized
-    - authentication failed
-    - token refresh failed
-    - login required
-    - not logged in
-    - invalid_grant
-    - credentials
-    """
-    text_lower = text.lower()
-    auth_keywords = [
-        "401",
-        "unauthorized",
-        "authentication failed",
-        "token refresh failed",
-        "login required",
-        "not logged in",
-        "invalid_grant",
-        "credentials",
-    ]
-    return any(keyword in text_lower for keyword in auth_keywords)
-
-
-def _is_retryable_error(error_kind: Optional[str], err_message: str) -> bool:
-    """判断错误是否可以重试
-
-    Codex 是只读操作，大部分错误都可以安全重试。
-    排除：命令不存在（需要用户干预）、认证错误（需要用户登录）
-    """
-    if error_kind == ErrorKind.COMMAND_NOT_FOUND:
-        return False
-    if error_kind == ErrorKind.AUTH_REQUIRED:
-        return False
-    # 其他错误都可以重试
-    return True
+from cc_mcp.tools.errors import (
+    CommandNotFoundError,
+    CommandTimeoutError,
+    ErrorKind,
+    _build_error_detail,
+    _is_auth_error,
+    _is_retryable_error,
+    is_reconnecting_message,
+)
+from cc_mcp.tools.metrics import MetricsCollector
+from cc_mcp.tools.process import safe_codex_command
 
 
 # ============================================================================
@@ -734,12 +100,11 @@ async def codex_tool(
 ) -> Dict[str, Any]:
     """执行 Codex 代码审核
 
-    调用 Codex 进行代码审核。
+    调用 Codex 进行独立代码审查。
 
-    **角色定位**：代码审核者
-    - 检查代码质量（可读性、可维护性、潜在 bug）
-    - 评估需求完成度
-    - 给出明确结论：✅ 通过 / ⚠️ 建议优化 / ❌ 需要修改
+    **角色定位**：最终独立审查者（只审不改）
+    - 检查逻辑正确性、边界条件、安全风险、测试缺口、可维护性
+    - 给出明确结论：✅ PASS 通过 / ⚠️ OPTIMIZE 建议优化 / ❌ CHANGE 需要修改
 
     **注意**：Codex 仅审核，严禁修改代码，默认 sandbox 为 read-only
     **重试策略**：Codex 默认允许 1 次重试（只读操作无副作用）
@@ -808,7 +173,6 @@ async def codex_tool(
 
                         # 收集消息（脱敏 tool_result 内容）
                         if return_all_messages:
-                            import copy
                             safe_dict = copy.deepcopy(line_dict)
                             item = safe_dict.get("item", {})
                             # Codex 的 tool_result 在 item 中
@@ -817,9 +181,6 @@ async def codex_tool(
                                 if "content" in item:
                                     item["content"] = "[truncated]"
                             all_messages.append(safe_dict)
-                        else:
-                            # 即使不返回也需要解析，但不存储
-                            pass
 
                         item = line_dict.get("item", {})
                         item_type = item.get("type", "")
@@ -844,9 +205,8 @@ async def codex_tool(
 
                         if "error" in line_dict.get("type", ""):
                             error_msg = line_dict.get("message", "")
-                            is_reconnecting = bool(re.match(r'^Reconnecting\.\.\.\s+\d+/\d+$', error_msg))
 
-                            if not is_reconnecting:
+                            if not is_reconnecting_message(error_msg):
                                 had_error = True
                                 err_message += "\n\n[codex error] " + error_msg
                                 # 检测是否为认证错误（优先级高于 UPSTREAM_ERROR）
@@ -898,28 +258,20 @@ async def codex_tool(
             err_message = str(e)
             success = False  # 明确设置为失败
             # 超时可以重试（Codex 只读）
+            all_last_lines = last_lines.copy()
+            last_error = {
+                "error_kind": error_kind,
+                "err_message": err_message,
+                "exit_code": exit_code,
+                "json_decode_errors": json_decode_errors,
+                "raw_output_lines": raw_output_lines,
+            }
             if retries < max_retries:
-                all_last_lines = last_lines.copy()
-                last_error = {
-                    "error_kind": error_kind,
-                    "err_message": err_message,
-                    "exit_code": exit_code,
-                    "json_decode_errors": json_decode_errors,
-                    "raw_output_lines": raw_output_lines,
-                }
                 retries += 1
                 time.sleep(0.5 * (2 ** (retries - 1)))
                 continue
             else:
                 # 已达最大重试次数
-                all_last_lines = last_lines.copy()
-                last_error = {
-                    "error_kind": error_kind,
-                    "err_message": err_message,
-                    "exit_code": exit_code,
-                    "json_decode_errors": json_decode_errors,
-                    "raw_output_lines": raw_output_lines,
-                }
                 break
 
         # 综合判断成功与否
@@ -951,29 +303,22 @@ async def codex_tool(
             # 成功，跳出重试循环
             break
         else:
+            # 记录本轮失败信息
+            all_last_lines = last_lines.copy()
+            last_error = {
+                "error_kind": error_kind,
+                "err_message": err_message,
+                "exit_code": exit_code,
+                "json_decode_errors": json_decode_errors,
+                "raw_output_lines": raw_output_lines,
+            }
             # 检查是否可重试
             if _is_retryable_error(error_kind, err_message) and retries < max_retries:
-                all_last_lines = last_lines.copy()
-                last_error = {
-                    "error_kind": error_kind,
-                    "err_message": err_message,
-                    "exit_code": exit_code,
-                    "json_decode_errors": json_decode_errors,
-                    "raw_output_lines": raw_output_lines,
-                }
                 retries += 1
                 # 指数退避
                 time.sleep(0.5 * (2 ** (retries - 1)))
             else:
                 # 不可重试或已达到最大重试次数
-                all_last_lines = last_lines.copy()
-                last_error = {
-                    "error_kind": error_kind,
-                    "err_message": err_message,
-                    "exit_code": exit_code,
-                    "json_decode_errors": json_decode_errors,
-                    "raw_output_lines": raw_output_lines,
-                }
                 break
 
     # 完成指标收集
