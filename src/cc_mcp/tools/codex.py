@@ -120,25 +120,38 @@ def codex_tool(
     image_list = image or []
 
     # 构建命令（shell=False 时不需要转义）
-    cmd = ["codex", "exec", "--sandbox", sandbox, "--cd", str(cd), "--json"]
-
-    if image_list:
-        cmd.extend(["--image", ",".join(str(p) for p in image_list)])
-
-    if model:
-        cmd.extend(["--model", model])
-
-    if profile:
-        cmd.extend(["--profile", profile])
-
-    if yolo:
-        cmd.append("--yolo")
-
-    if skip_git_repo_check:
-        cmd.append("--skip-git-repo-check")
-
+    #
+    # 关键：`resume` 是 `codex exec` 的子命令，选项集与 exec 不同——
+    #   - resume 不支持 --sandbox / --cd / --profile（沿用原会话的设置）
+    #   - resume 的选项必须放在 `resume` 子命令之后，而非之前
+    #   - resume 的 PROMPT 需用 `-` 显式声明从 stdin 读取
+    # 误把 exec 级 flag（尤其 --json）放在 resume 之前会导致 resume 不输出 JSONL，
+    # 解析不到 thread_id / agent_message，复审上下文续接形同失效。
     if SESSION_ID:
-        cmd.extend(["resume", str(SESSION_ID)])
+        # 续接已有会话，保留初审上下文；工作目录由 Popen(cwd=cd) 保证
+        cmd = ["codex", "exec", "resume", "--json"]
+        if skip_git_repo_check:
+            cmd.append("--skip-git-repo-check")
+        if image_list:
+            cmd.extend(["--image", ",".join(str(p) for p in image_list)])
+        if model:
+            cmd.extend(["--model", model])
+        # SESSION_ID 为位置参数；`-` 表示 PROMPT 从 stdin 读取
+        cmd.extend([str(SESSION_ID), "-"])
+    else:
+        # 新会话
+        cmd = ["codex", "exec", "--sandbox", sandbox, "--cd", str(cd), "--json"]
+        if skip_git_repo_check:
+            cmd.append("--skip-git-repo-check")
+        if image_list:
+            cmd.extend(["--image", ",".join(str(p) for p in image_list)])
+        if model:
+            cmd.extend(["--model", model])
+        if profile:
+            cmd.extend(["--profile", profile])
+        if yolo:
+            # codex 无 --yolo；正确 flag 是 --dangerously-bypass-approvals-and-sandbox
+            cmd.append("--dangerously-bypass-approvals-and-sandbox")
 
     # PROMPT 通过 stdin 传递，不再作为命令行参数
 
