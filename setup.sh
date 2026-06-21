@@ -1,5 +1,6 @@
 #!/bin/bash
-# CCG One-Click Setup Script for macOS/Linux
+# CC One-Click Setup Script for macOS/Linux
+# Claude + Codex 双模型协作 MCP 服务器
 set -e
 
 # Color codes for output
@@ -58,40 +59,50 @@ else
     exit 1
 fi
 
+# Check codex CLI (the only reviewer this server drives)
+if command -v codex &> /dev/null; then
+    write_success "codex CLI is installed"
+else
+    write_warning "codex CLI is not installed"
+    echo "The cc server reviews code via the Codex CLI. Install and log in before use:"
+    echo "  https://developers.openai.com/codex/quickstart"
+    echo "  codex login"
+fi
+
 # ==============================================================================
 # Step 2: Register MCP server
 # ==============================================================================
 write_step "Step 2: Registering MCP server..."
 
-# Check if ccg is already registered by inspecting settings.json
+# Check if cc is already registered by inspecting settings.json
 SETTINGS_FILE="$HOME/.claude/settings.json"
 MCP_REGISTERED=false
-if [ -f "$SETTINGS_FILE" ] && grep -q '"ccg"' "$SETTINGS_FILE" 2>/dev/null; then
+if [ -f "$SETTINGS_FILE" ] && grep -q '"cc"' "$SETTINGS_FILE" 2>/dev/null; then
     MCP_REGISTERED=true
 fi
 
 if [ "$MCP_REGISTERED" = true ]; then
-    write_warning "MCP server 'ccg' is already registered, skipping"
+    write_warning "MCP server 'cc' is already registered, skipping"
 else
-    if claude mcp add ccg -s user --transport stdio -- uvx --from "file:$SCRIPT_DIR" ccg-mcp; then
+    if claude mcp add cc -s user --transport stdio -- uvx --from "file:$SCRIPT_DIR" cc-mcp; then
         write_success "MCP server registered"
     else
         write_error "Failed to register MCP server"
         echo "You can register manually:"
-        echo "  claude mcp add ccg -s user --transport stdio -- uvx --from \"file:$SCRIPT_DIR\" ccg-mcp"
+        echo "  claude mcp add cc -s user --transport stdio -- uvx --from \"file:$SCRIPT_DIR\" cc-mcp"
         exit 1
     fi
 fi
 
 # ==============================================================================
-# Step 3: Install Skills + Configure CLAUDE.md
+# Step 3: Install Skill + Configure CLAUDE.md
 # ==============================================================================
-write_step "Step 3: Installing Skills and configuring CLAUDE.md..."
+write_step "Step 3: Installing Skill and configuring CLAUDE.md..."
 
 # Ensure directories exist
 mkdir -p "$HOME/.claude/skills"
 
-# --- Skills ---
+# --- Skill ---
 SKILLS_DIR="$HOME/.claude/skills"
 
 install_skill() {
@@ -115,116 +126,48 @@ install_skill() {
     write_success "Installed $name skill"
 }
 
-install_skill "ccg-workflow"
-install_skill "gemini-collaboration"
+install_skill "codex-review"
+
+# Remove skills from the old 4-model layout if present
+for old_skill in ccg-workflow gemini-collaboration; do
+    if [ -d "$SKILLS_DIR/$old_skill" ]; then
+        rm -rf "$SKILLS_DIR/$old_skill"
+        write_success "Removed legacy $old_skill skill"
+    fi
+done
 
 # --- CLAUDE.md ---
 CLAUDE_MD_PATH="$HOME/.claude/CLAUDE.md"
-CCG_MARKER="# CCG Configuration"
-CCG_CONFIG_PATH="$SCRIPT_DIR/templates/ccg-global-prompt.md"
+CC_MARKER="# CC Configuration"
+CC_CONFIG_PATH="$SCRIPT_DIR/templates/cc-global-prompt.md"
 
-if [ ! -f "$CCG_CONFIG_PATH" ]; then
-    write_warning "CCG global prompt template not found at $CCG_CONFIG_PATH"
+if [ ! -f "$CC_CONFIG_PATH" ]; then
+    write_warning "CC global prompt template not found at $CC_CONFIG_PATH"
 elif [ ! -f "$CLAUDE_MD_PATH" ]; then
-    cp "$CCG_CONFIG_PATH" "$CLAUDE_MD_PATH"
+    cp "$CC_CONFIG_PATH" "$CLAUDE_MD_PATH"
     write_success "Created global CLAUDE.md"
-elif grep -qF "$CCG_MARKER" "$CLAUDE_MD_PATH"; then
-    write_success "CCG configuration already in CLAUDE.md"
+elif grep -qF "$CC_MARKER" "$CLAUDE_MD_PATH"; then
+    write_success "CC configuration already in CLAUDE.md"
 else
     echo "" >> "$CLAUDE_MD_PATH"
-    cat "$CCG_CONFIG_PATH" >> "$CLAUDE_MD_PATH"
-    write_success "Appended CCG configuration to CLAUDE.md"
+    cat "$CC_CONFIG_PATH" >> "$CLAUDE_MD_PATH"
+    write_success "Appended CC configuration to CLAUDE.md"
 fi
-
-# ==============================================================================
-# Step 4: Configure Coder
-# ==============================================================================
-write_step "Step 4: Configuring Coder..."
-
-CONFIG_DIR="$HOME/.ccg-mcp"
-CONFIG_PATH="$CONFIG_DIR/config.toml"
-mkdir -p "$CONFIG_DIR"
-
-# Check if config already exists
-if [ -f "$CONFIG_PATH" ]; then
-    write_warning "Config file already exists at $CONFIG_PATH"
-    read -p "Overwrite? (y/N): " OVERWRITE
-    if [ "$OVERWRITE" != "y" ] && [ "$OVERWRITE" != "Y" ]; then
-        write_warning "Skipping Coder configuration"
-        echo ""
-        echo -e "${GREEN}============================================================${NC}"
-        write_success "CCG setup completed successfully!"
-        echo -e "${GREEN}============================================================${NC}"
-        echo ""
-        echo "Next steps:"
-        echo "  1. Restart Claude Code CLI"
-        echo "  2. Verify MCP server: claude mcp list"
-        echo "  3. Check available skills: /ccg-workflow"
-        echo ""
-        exit 0
-    fi
-fi
-
-# Support non-interactive mode via environment variables
-API_TOKEN="${CCG_API_TOKEN:-}"
-BASE_URL="${CCG_BASE_URL:-}"
-MODEL="${CCG_MODEL:-}"
-
-# Interactive prompts only for missing values
-if [ -z "$API_TOKEN" ]; then
-    read -s -p "Enter your API Token: " API_TOKEN
-    echo
-    if [ -z "$API_TOKEN" ]; then
-        write_error "API Token is required"
-        exit 1
-    fi
-fi
-
-if [ -z "$BASE_URL" ]; then
-    read -p "Enter Base URL (default: https://open.bigmodel.cn/api/anthropic): " BASE_URL
-    if [ -z "$BASE_URL" ]; then
-        BASE_URL="https://open.bigmodel.cn/api/anthropic"
-    fi
-fi
-
-if [ -z "$MODEL" ]; then
-    read -p "Enter Model (e.g. glm-4.7): " MODEL
-    MODEL=$(echo "$MODEL" | xargs)
-    if [ -z "$MODEL" ]; then
-        write_error "Model is required"
-        exit 1
-    fi
-fi
-
-# Escape special characters for TOML string values (backslash and double quote)
-SAFE_API_TOKEN=$(printf '%s' "$API_TOKEN" | sed 's/\\/\\\\/g; s/"/\\"/g')
-SAFE_BASE_URL=$(printf '%s' "$BASE_URL" | sed 's/\\/\\\\/g; s/"/\\"/g')
-SAFE_MODEL=$(printf '%s' "$MODEL" | sed 's/\\/\\\\/g; s/"/\\"/g')
-
-# Generate config.toml
-cat > "$CONFIG_PATH" << EOF
-[coder]
-api_token = "$SAFE_API_TOKEN"
-base_url = "$SAFE_BASE_URL"
-model = "$SAFE_MODEL"
-
-[coder.env]
-CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1"
-EOF
-
-chmod 600 "$CONFIG_PATH"
-write_success "Coder configuration saved to $CONFIG_PATH"
 
 # ==============================================================================
 # Done!
 # ==============================================================================
 echo ""
 echo -e "${GREEN}============================================================${NC}"
-write_success "CCG setup completed successfully!"
+write_success "CC setup completed successfully!"
 echo -e "${GREEN}============================================================${NC}"
 echo ""
+echo "Codex uses its own CLI auth (codex login / OPENAI_API_KEY / ~/.codex/config.toml)."
+echo "No local config file is needed."
+echo ""
 echo "Next steps:"
-echo "  1. Restart Claude Code CLI"
-echo "  2. Verify MCP server: claude mcp list"
-echo "  3. Check available skills: /ccg-workflow"
+echo "  1. Make sure Codex is logged in:  codex login"
+echo "  2. Restart Claude Code CLI"
+echo "  3. Verify MCP server: claude mcp list"
+echo "  4. Check the skill: /codex-review"
 echo ""

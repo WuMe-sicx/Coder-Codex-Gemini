@@ -1,5 +1,5 @@
 @echo off
-:: CCG Uninstall Launcher for Windows
+:: CC Uninstall Launcher for Windows
 :: Double-click this file to run uninstall.ps1
 
 cd /d "%~dp0"

@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-CCG (Coder-Codex-Gemini) is a unified MCP server that enables Claude (Opus) to orchestrate three AI tools: **Coder** (code execution via configurable backend), **Codex** (independent code review via OpenAI), and **Gemini** (expert consultation via Gemini CLI). Built with FastMCP, Python 3.12+, transport is stdio.
+CC (Claude + Codex) is a single-tool MCP server that lets Claude (the writer) hand a finished, self-tested change to **Codex** for independent final review. Codex reviews only — it never modifies code or files. Built with FastMCP, Python 3.12+, transport is stdio.
+
+The collaboration model is deliberately inverted from a prior 4-model design: **Claude writes and self-tests; Codex is the last gate and Claude must not self-approve.** See `需求文档.md` for the authoritative spec and `skills/codex-review/SKILL.md` for the working loop.
 
 ## Development Commands
 
@@ -13,72 +15,71 @@ CCG (Coder-Codex-Gemini) is a unified MCP server that enables Claude (Opus) to o
 uv sync
 
 # Run the MCP server locally
-uv run ccg-mcp
+uv run cc-mcp
+
+# Import sanity check
+uv run python -c "import cc_mcp.server"
 
 # Register with Claude Code (local dev)
-claude mcp add ccg -s user --transport stdio -- uv run --directory $(pwd) ccg-mcp
+claude mcp add cc -s user --transport stdio -- uvx --from "file:$(pwd)" cc-mcp
 
 # Register with Claude Code (remote/production)
-claude mcp add ccg -s user --transport stdio -- uvx --refresh --from git+https://github.com/WuMe-sicx/Coder-Codex-Gemini.git ccg-mcp
+claude mcp add cc -s user --transport stdio -- uvx --refresh --from git+https://github.com/WuMe-sicx/Coder-Codex-Gemini.git cc-mcp
 
 # Build distribution
 uv build
+
+# One-click setup / uninstall (also installs the skill + global prompt)
+./setup.sh        # macOS/Linux  (setup.ps1 / setup.bat on Windows)
+./uninstall.sh
 ```
 
-No test suite or linter is configured.
+No test suite or linter is configured. Codex authenticates through its own CLI (`codex login` / `OPENAI_API_KEY` / `~/.codex/config.toml`); this server stores **no** config of its own.
 
 ## Architecture
 
 ### Entry Flow
 
-`cli.py:main()` -> `server.py:run()` -> `FastMCP("CCG-MCP Server").run(transport="stdio")`
+`cli.py:main()` → `server.py:run()` → `FastMCP("CC-MCP Server").run(transport="stdio")`
 
-### Three MCP Tools (registered in server.py)
+### The one MCP tool
 
-Each tool follows the same pattern: **async function in server.py** delegates to **tool module in tools/**, which builds a subprocess command, runs the target CLI, parses streaming JSON output, handles errors/retries, and returns a structured dict.
+`server.py` registers a single async tool, `codex`, which delegates to `tools/codex.py:codex_tool()`. That module builds a `codex exec` subprocess command, streams its JSONL output, parses session id / agent text / errors, handles retries, and returns a structured dict.
 
 | Tool | CLI invoked | Default sandbox | Default retries | Side effects |
 |------|-------------|-----------------|-----------------|--------------|
-| `coder` | `claude` (Claude Code CLI) | `workspace-write` | 0 (writes files) | Yes |
 | `codex` | `codex` (OpenAI Codex CLI) | `read-only` | 1 (safe) | No |
-| `gemini` | `gemini` (Gemini CLI) | `workspace-write` | 1 | Yes |
 
-### Subprocess Execution Pattern (all three tools share this)
+### Subprocess execution pattern (tools/codex.py)
 
-1. **Config loading**: `config.py:get_config()` reads `~/.ccg-mcp/config.toml` (cached at module level)
-2. **Environment injection**: `build_coder_env()` / `build_gemini_env()` creates a clean env dict, removing parent process interference vars (`CLAUDE_CODE_ENTRYPOINT`, `ANTHROPIC_MODEL`, etc.)
-3. **Command construction**: CLI args assembled with `--print`, `--output-format stream-json`, sandbox flags, system prompt via `--append-system-prompt`, prompt via stdin
-4. **Safe execution**: `safe_*_command()` context manager wraps `subprocess.Popen(shell=False)` with background stdout-reading thread + output queue
-5. **Stream parsing**: Line-by-line JSONL parsing extracts session ID, assistant text, results, and errors (each CLI has different JSON schema)
-6. **Dual timeout**: Idle timeout (default 300s, no output) + total duration cap (default 1800s)
-7. **Graceful shutdown**: SIGTERM -> 5s wait -> SIGKILL -> 5s wait -> abandon. 0.3s drain delay after completion marker.
+1. **Env isolation**: `config.py:build_codex_env()` copies `os.environ` and strips parent Claude Code interference vars (`CLAUDE_CODE_ENTRYPOINT`, `ANTHROPIC_*`, …) so Claude-side credentials never leak into the OpenAI-backed subprocess. This is the *only* job `config.py` has — there is no config file.
+2. **Command construction**: `codex exec --sandbox … --cd … --json`, plus optional `--image/--model/--profile/--yolo/--skip-git-repo-check`; `resume <SESSION_ID>` for multi-turn.
+3. **System prompt injection**: Codex CLI has no native system-prompt flag, so `CODEX_SYSTEM_PROMPT` is prepended to the user PROMPT over stdin (`# System … # Task …`). The prompt encodes the review checklist (correctness / boundaries / security / test gaps / maintainability) and the verdict format.
+4. **Safe execution**: `safe_codex_command()` context manager wraps `subprocess.Popen(shell=False)` in its own process group, with a background stdout-reading thread feeding an output queue.
+5. **Stream parsing**: line-by-line JSONL extracts `thread_id` (the session id), `agent_message` text, and `fail`/`error` events.
+6. **Dual timeout**: idle timeout (no output, default 300s) + total duration cap (default 1800s).
+7. **Graceful shutdown**: SIGTERM → 5s → SIGKILL → 5s → abandon; 0.3s drain after the `turn.completed` marker.
 
-### Configuration Priority
+### Verdict & structured errors
 
-`~/.ccg-mcp/config.toml` > environment variables (`CODER_API_TOKEN`, `CODER_BASE_URL`, `CODER_MODEL`)
+The review ends with exactly one verdict line: `✅ PASS` / `⚠️ OPTIMIZE` / `❌ CHANGE`. Tool results are `Dict[str, Any]` with `success`, and on failure `error`, `error_kind`, `error_detail`. Error kinds: `timeout`, `idle_timeout`, `command_not_found`, `upstream_error`, `auth_required`, `json_decode`, `protocol_missing_session`, `empty_result`, `subprocess_error`, `unexpected_exception`.
 
-Coder config requires: `api_token`, `base_url`, `model` under `[coder]` section. Optional `[coder.env]` for extra env vars.
+### Key design decisions
 
-Gemini reads API keys from `~/.gemini/.env` (whitelist: `GEMINI_API_KEY`, `GOOGLE_API_KEY`, `GOOGLE_GEMINI_BASE_URL`, `GEMINI_MODEL`).
+- **Retry safety**: Codex is read-only, so up to 1 automatic retry is safe (exponential backoff). `command_not_found` and `auth_required` are non-retryable — they need the user.
+- **Prompt via stdin**: avoids shell-escaping and length limits for multiline review prompts (including embedded `git diff`).
+- **Auth detection**: `_is_auth_error()` scans output for 401 / unauthorized / "not logged in" etc., maps to `auth_required`, and surfaces a `codex login` hint.
+- **Metrics**: `MetricsCollector` tracks timing, prompt/result sizes, exit code, retries; optionally emitted to stderr as JSONL via `log_metrics`.
 
-### Structured Error Returns
+## Repo layout beyond `src/`
 
-All tools return `Dict[str, Any]` with `success`, `error`, `error_kind`, and `error_detail`. Error kinds: `timeout`, `idle_timeout`, `command_not_found`, `upstream_error`, `auth_required`, `json_decode`, `protocol_missing_session`, `empty_result`, `subprocess_error`, `unexpected_exception`.
+- `skills/codex-review/` — the workflow skill installed into `~/.claude/skills` (SKILL.md + codex-guide.md + examples.md + constraint.md). This is the behavioral spec for how Claude should drive the review loop.
+- `templates/cc-global-prompt.md` — the `# CC Configuration` block appended to the user's global `~/.claude/CLAUDE.md` by setup.
+- `setup.*` / `uninstall.*` — three-platform installers (`.sh`, `.ps1`, `.bat`).
 
-### Key Design Decisions
+## Code conventions
 
-- **Parent env cleanup (Coder)**: Explicitly removes vars like `ANTHROPIC_MODEL`, `CLAUDE_CODE_ENTRYPOINT` from subprocess env to prevent parent Claude Code process from interfering with the configured backend.
-- **Model aliasing (Coder)**: Maps the configured model to ALL Claude model slots (`ANTHROPIC_DEFAULT_OPUS_MODEL`, `SONNET`, `HAIKU`, `CLAUDE_CODE_SUBAGENT_MODEL`) to ensure the backend model is used regardless of which tier Claude Code selects.
-- **Session ID extraction**: Each CLI emits session IDs differently (Coder: `system.init`, Codex: `thread_id`, Gemini: `init` event). Parsed per-tool for conversation continuity.
-- **Retry safety**: Coder defaults to 0 retries because it has write side effects. Codex/Gemini default to 1 retry because they're safe (readonly or idempotent).
-- **Prompt delivery via stdin**: Supports multiline prompts with no length limit, avoiding shell escaping issues.
-- **Metrics via MetricsCollector**: Each tool has its own MetricsCollector tracking timing, prompt/result sizes, exit codes, retries. Optionally logged to stderr as JSONL.
-
-## Code Conventions
-
-- Language: Python 3.12+ with type hints throughout
-- Async functions for MCP tool handlers (server.py), sync internals in tool modules
-- Tool parameters use `Annotated[type, Field(...)]` for MCP schema generation
-- All three tool modules (~950 lines each) share near-identical structure; changes to one likely need mirroring to the others
-- Chinese comments and docstrings throughout the codebase
-- Error handling uses custom exception classes (`CommandTimeoutError`) and `ErrorKind` string constants
+- Python 3.12+ with type hints; async tool handler in `server.py`, sync internals in `tools/codex.py`.
+- Tool params use `Annotated[type, Field(...)]` for MCP schema generation.
+- Chinese comments and docstrings throughout.
+- Error handling uses `CommandTimeoutError` / `CommandNotFoundError` and the `ErrorKind` string constants — never swallow exceptions silently.

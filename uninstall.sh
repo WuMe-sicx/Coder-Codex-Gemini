@@ -1,5 +1,5 @@
 #!/bin/bash
-# CCG Uninstall Script for macOS/Linux
+# CC Uninstall Script for macOS/Linux
 set -e
 
 # Color codes for output
@@ -34,49 +34,49 @@ write_warning() {
 # ==============================================================================
 write_step "Step 1: Removing MCP server registration..."
 
-# Use Python to directly modify ~/.claude/settings.json
+# Use Python to directly modify ~/.claude/settings.json.
+# Also clean up the legacy "ccg" entry from the old 4-model layout.
 python3 -c "
 import json
 import os
 
 settings_path = os.path.expanduser('~/.claude/settings.json')
 
-# Skip if settings file doesn't exist
 if not os.path.exists(settings_path):
-    print('[WARN] MCP server \"ccg\" was not registered')
+    print('[WARN] MCP server was not registered')
     exit(0)
 
-# Read existing settings
 try:
     with open(settings_path, 'r') as f:
         content = f.read().strip()
         if not content:
-            print('[WARN] MCP server \"ccg\" was not registered')
+            print('[WARN] MCP server was not registered')
             exit(0)
         settings = json.loads(content)
 except (json.JSONDecodeError, ValueError):
     print('[WARN] settings.json is corrupt, skipping MCP removal')
     exit(0)
 
-# Check if mcpServers exists and has ccg entry
-if 'mcpServers' not in settings or 'ccg' not in settings['mcpServers']:
-    print('[WARN] MCP server \"ccg\" was not registered')
+servers = settings.get('mcpServers', {})
+removed = []
+for name in ('cc', 'ccg'):
+    if name in servers:
+        del servers[name]
+        removed.append(name)
+
+if not removed:
+    print('[WARN] MCP server \"cc\" was not registered')
     exit(0)
 
-# Remove the ccg entry
-del settings['mcpServers']['ccg']
-
-# Remove mcpServers key if empty
-if not settings['mcpServers']:
+if not servers:
     del settings['mcpServers']
 
-# Write back to file
 with open(settings_path, 'w') as f:
     json.dump(settings, f, indent=2)
     f.write('\n')
 
-print('[OK] MCP server \"ccg\" removed')
-" || write_warning "MCP server 'ccg' was not registered"
+print('[OK] MCP server(s) removed: ' + ', '.join(removed))
+" || write_warning "MCP server 'cc' was not registered"
 
 # ==============================================================================
 # Step 2: Remove Skills
@@ -84,84 +84,77 @@ print('[OK] MCP server \"ccg\" removed')
 write_step "Step 2: Removing Skills..."
 
 SKILLS_DIR="$HOME/.claude/skills"
-CCG_WORKFLOW="$SKILLS_DIR/ccg-workflow"
-GEMINI_COLLAB="$SKILLS_DIR/gemini-collaboration"
 
-if [ -d "$CCG_WORKFLOW" ]; then
-    rm -rf "$CCG_WORKFLOW"
-    write_success "Removed ccg-workflow skill"
-else
-    write_warning "ccg-workflow skill not found, skipping"
-fi
-
-if [ -d "$GEMINI_COLLAB" ]; then
-    rm -rf "$GEMINI_COLLAB"
-    write_success "Removed gemini-collaboration skill"
-else
-    write_warning "gemini-collaboration skill not found, skipping"
-fi
+# codex-review is the current skill; ccg-workflow / gemini-collaboration are legacy.
+for skill in codex-review ccg-workflow gemini-collaboration; do
+    if [ -d "$SKILLS_DIR/$skill" ]; then
+        rm -rf "$SKILLS_DIR/$skill"
+        write_success "Removed $skill skill"
+    else
+        write_warning "$skill skill not found, skipping"
+    fi
+done
 
 # ==============================================================================
-# Step 3: Remove CCG config from global CLAUDE.md
+# Step 3: Remove CC config from global CLAUDE.md
 # ==============================================================================
-write_step "Step 3: Removing CCG configuration from global CLAUDE.md..."
+write_step "Step 3: Removing CC configuration from global CLAUDE.md..."
 
 CLAUDE_MD_PATH="$HOME/.claude/CLAUDE.md"
-CCG_MARKER="# CCG Configuration"
 
-if [ -f "$CLAUDE_MD_PATH" ]; then
-    # Check if CCG marker exists
-    if grep -qF "$CCG_MARKER" "$CLAUDE_MD_PATH"; then
-        # Check if file starts with the marker (CCG config is the only content)
+# Support both the new "# CC Configuration" marker and the legacy "# CCG Configuration".
+remove_marker() {
+    local marker="$1"
+    if grep -qF "$marker" "$CLAUDE_MD_PATH"; then
         first_line=$(head -n 1 "$CLAUDE_MD_PATH")
-        if [ "$first_line" = "$CCG_MARKER" ]; then
-            # Delete the entire file
+        if [ "$first_line" = "$marker" ]; then
             rm "$CLAUDE_MD_PATH"
-            write_success "Removed global CLAUDE.md (contained only CCG configuration)"
+            write_success "Removed global CLAUDE.md (contained only CC configuration)"
         else
-            # Remove from marker line to end of file
-            # Create temp file with content before the marker
             temp_file=$(mktemp)
-            sed -e "/$CCG_MARKER/,\$d" "$CLAUDE_MD_PATH" > "$temp_file"
-            # Remove trailing newline if file ends with one
+            sed -e "/$marker/,\$d" "$CLAUDE_MD_PATH" > "$temp_file"
             if [ -s "$temp_file" ]; then
                 mv "$temp_file" "$CLAUDE_MD_PATH"
-                write_success "Removed CCG configuration from global CLAUDE.md"
+                write_success "Removed CC configuration from global CLAUDE.md"
             else
-                # If file is empty after removal, delete it
                 rm -f "$temp_file"
                 rm "$CLAUDE_MD_PATH"
-                write_success "Removed global CLAUDE.md (now empty after removing CCG configuration)"
+                write_success "Removed global CLAUDE.md (empty after removal)"
             fi
         fi
-    else
-        write_warning "CCG configuration marker not found in CLAUDE.md, skipping"
+        return 0
+    fi
+    return 1
+}
+
+if [ -f "$CLAUDE_MD_PATH" ]; then
+    if ! remove_marker "# CC Configuration" && ! remove_marker "# CCG Configuration"; then
+        write_warning "CC configuration marker not found in CLAUDE.md, skipping"
     fi
 else
     write_warning "Global CLAUDE.md not found, skipping"
 fi
 
 # ==============================================================================
-# Step 4: Remove config directory
+# Step 4: Remove legacy config directory (old 4-model layout)
 # ==============================================================================
-write_step "Step 4: Removing CCG configuration directory..."
+write_step "Step 4: Removing legacy configuration directory..."
 
 CONFIG_DIR="$HOME/.ccg-mcp"
 
 if [ -d "$CONFIG_DIR" ]; then
-    # Ask for confirmation before deleting
-    echo -e "${YELLOW}WARNING: This will delete your CCG configuration directory:${NC}"
+    echo -e "${YELLOW}WARNING: This will delete the legacy configuration directory:${NC}"
     echo "  $CONFIG_DIR"
-    echo -e "${YELLOW}This contains your API token and other settings.${NC}"
-    read -p "Are you sure you want to delete it? (y/N): " CONFIRM
+    echo -e "${YELLOW}It may contain an old API token.${NC}"
+    read -p "Delete it? (y/N): " CONFIRM
     if [ "$CONFIRM" = "y" ] || [ "$CONFIRM" = "Y" ]; then
         rm -rf "$CONFIG_DIR"
-        write_success "Removed CCG configuration directory"
+        write_success "Removed legacy configuration directory"
     else
-        write_warning "Skipped removing CCG configuration directory"
+        write_warning "Skipped removing legacy configuration directory"
     fi
 else
-    write_warning "CCG configuration directory not found, skipping"
+    write_warning "No legacy configuration directory found, skipping"
 fi
 
 # ==============================================================================
@@ -170,11 +163,8 @@ fi
 write_step "Step 5: Cleaning uv cache..."
 
 if command -v uv &> /dev/null; then
-    if uv cache clean ccg-mcp 2>/dev/null; then
-        write_success "Cleaned uv cache for ccg-mcp"
-    else
-        write_warning "Failed to clean uv cache (non-critical)"
-    fi
+    uv cache clean cc-mcp 2>/dev/null && write_success "Cleaned uv cache for cc-mcp" || write_warning "Failed to clean uv cache (non-critical)"
+    uv cache clean ccg-mcp 2>/dev/null || true
 else
     write_warning "uv not found, skipping cache cleanup"
 fi
@@ -184,11 +174,8 @@ fi
 # ==============================================================================
 echo ""
 echo -e "${GREEN}============================================================${NC}"
-write_success "CCG uninstall completed!"
+write_success "CC uninstall completed!"
 echo -e "${GREEN}============================================================${NC}"
 echo ""
-echo "Note: uv and claude CLI were left installed."
-echo "To remove them manually:"
-echo "  - uv: See https://github.com/astral-sh/uv"
-echo "  - claude CLI: npm uninstall -g @anthropic-ai/claude-code"
+echo "Note: uv, claude CLI and codex CLI were left installed."
 echo ""

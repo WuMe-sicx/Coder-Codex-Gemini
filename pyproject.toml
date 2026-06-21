@@ -3,9 +3,9 @@ requires = ["hatchling>=1.25"]
 build-backend = "hatchling.build"
 
 [project]
-name = "ccg-mcp"
-version = "0.1.0"
-description = "Claude + Coder + Codex + Gemini 多模型协作 MCP 服务器"
+name = "cc-mcp"
+version = "0.2.0"
+description = "Claude + Codex 双模型协作 MCP 服务器：Claude 写代码，Codex 独立终审"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -13,10 +13,10 @@ dependencies = [
     "pydantic>=2.0",
 ]
 authors = [
-    { name = "CCG-MCP Contributors" },
+    { name = "CC-MCP Contributors" },
 ]
 license = { text = "MIT" }
-keywords = ["mcp", "fastmcp", "coder", "codex", "gemini", "claude"]
+keywords = ["mcp", "fastmcp", "codex", "claude", "code-review"]
 classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.12",
@@ -28,10 +28,10 @@ classifiers = [
 Homepage = "https://github.com/WuMe-sicx/Coder-Codex-Gemini"
 
 [project.scripts]
-ccg-mcp = "ccg_mcp.cli:main"
+cc-mcp = "cc_mcp.cli:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/ccg_mcp"]
+packages = ["src/cc_mcp"]
 
 [tool.hatch.build.targets.sdist]
-include = ["src/ccg_mcp", "README.md", "LICENSE"]
+include = ["src/cc_mcp", "README.md", "LICENSE"]

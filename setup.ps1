@@ -1,5 +1,5 @@
-# CCG One-Click Setup Script for Windows
-# This script automates the setup of Coder-Codex-Gemini MCP server
+# CC One-Click Setup Script for Windows
+# Claude + Codex 双模型协作 MCP 服务器
 
 param(
     [switch]$WhatIf,
@@ -9,7 +9,7 @@ param(
 # Show help
 if ($Help) {
     Write-Host @"
-CCG One-Click Setup Script for Windows
+CC One-Click Setup Script for Windows
 
 Usage: .\setup.ps1 [-WhatIf] [-Help]
 
@@ -77,7 +77,6 @@ Write-Step "Step 1: Checking dependencies..."
 function Refresh-PathFromRegistry {
     $registryPath = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
     $currentPath = $env:Path
-    # Merge: add registry paths that are not already in current PATH
     $currentPaths = $currentPath -split ';' | Where-Object { $_ -ne '' }
     $registryPaths = $registryPath -split ';' | Where-Object { $_ -ne '' }
     $newPaths = $registryPaths | Where-Object { $_ -notin $currentPaths }
@@ -93,7 +92,6 @@ try {
     $uvInstalled = $true
     Write-Success "uv is installed"
 } catch {
-    # Try refreshing PATH from registry (may help find tools installed by npm, scoop, etc.)
     Refresh-PathFromRegistry
     try {
         $null = uv --version 2>&1
@@ -107,7 +105,6 @@ try {
             Write-WarningMsg "uv is not installed, installing automatically..."
             try {
                 powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
-                # Refresh PATH again after installation
                 Refresh-PathFromRegistry
                 $null = uv --version 2>&1
                 $uvInstalled = $true
@@ -128,7 +125,6 @@ try {
     $claudeInstalled = $true
     Write-Success "claude CLI is installed"
 } catch {
-    # Try refreshing PATH from registry (may help find tools installed by npm, scoop, etc.)
     Refresh-PathFromRegistry
     try {
         $null = claude --version 2>&1
@@ -148,6 +144,23 @@ try {
             Write-Host "  3. For npm install: npm install -g @anthropic-ai/claude-code" -ForegroundColor White
             exit 1
         }
+    }
+}
+
+# Check codex CLI (the only reviewer this server drives)
+try {
+    $null = codex --version 2>&1
+    Write-Success "codex CLI is installed"
+} catch {
+    Refresh-PathFromRegistry
+    try {
+        $null = codex --version 2>&1
+        Write-Success "codex CLI is installed"
+    } catch {
+        Write-WarningMsg "codex CLI is not installed"
+        Write-Host "The cc server reviews code via the Codex CLI. Install and log in before use:" -ForegroundColor Yellow
+        Write-Host "  https://developers.openai.com/codex/quickstart" -ForegroundColor White
+        Write-Host "  codex login" -ForegroundColor White
     }
 }
 
@@ -193,7 +206,7 @@ if (-not $uvxPath) {
 
 # Build MCP config JSON
 $mcpConfig = [PSCustomObject]@{
-    args = @("--from", "file:$projectDir", "ccg-mcp")
+    args = @("--from", "file:$projectDir", "cc-mcp")
     command = $uvxPath
     cwd = $projectDir
     type = "stdio"
@@ -210,7 +223,7 @@ Write-Host "============================================================" -Foreg
 Write-Host "  MCP Server Configuration (add to settings.json manually)" -ForegroundColor Cyan
 Write-Host "============================================================" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "Add the following to mcpServers.ccg in:" -ForegroundColor Yellow
+Write-Host "Add the following to mcpServers.cc in:" -ForegroundColor Yellow
 Write-Host "  $env:USERPROFILE\.claude\settings.json" -ForegroundColor White
 Write-Host ""
 Write-Host $mcpJson -ForegroundColor Green
@@ -219,63 +232,51 @@ Write-Host "============================================================" -Foreg
 Write-Success "MCP configuration generated"
 
 # ==============================================================================
-# Step 4: Install Skills
+# Step 4: Install Skill
 # ==============================================================================
-Write-Step "Step 4: Installing Skills..."
+Write-Step "Step 4: Installing Skill..."
 
 $skillsDir = "$env:USERPROFILE\.claude\skills"
-$ccgWorkflowSource = Join-Path $PSScriptRoot "skills\ccg-workflow"
-$geminiCollabSource = Join-Path $PSScriptRoot "skills\gemini-collaboration"
+$codexReviewSource = Join-Path $PSScriptRoot "skills\codex-review"
 
 if ($DryRun) {
     if (!(Test-Path $skillsDir)) {
         Write-DryRun "Would create directory: $skillsDir"
     }
-    if (Test-Path $ccgWorkflowSource) {
-        Write-DryRun "Would copy: $ccgWorkflowSource -> $skillsDir\ccg-workflow"
-        Write-Success "ccg-workflow skill would be installed"
+    if (Test-Path $codexReviewSource) {
+        Write-DryRun "Would copy: $codexReviewSource -> $skillsDir\codex-review"
+        Write-Success "codex-review skill would be installed"
     } else {
-        Write-WarningMsg "ccg-workflow skill not found, would skip"
-    }
-    if (Test-Path $geminiCollabSource) {
-        Write-DryRun "Would copy: $geminiCollabSource -> $skillsDir\gemini-collaboration"
-        Write-Success "gemini-collaboration skill would be installed"
-    } else {
-        Write-WarningMsg "gemini-collaboration skill not found, would skip"
+        Write-WarningMsg "codex-review skill not found, would skip"
     }
 } else {
     try {
-        # Create skills directory if it doesn't exist
         if (!(Test-Path $skillsDir)) {
             New-Item -ItemType Directory -Path $skillsDir -Force | Out-Null
             Write-Success "Created skills directory: $skillsDir"
         }
 
-        # Copy ccg-workflow skill
-        if (Test-Path $ccgWorkflowSource) {
-            $dest = "$skillsDir\ccg-workflow"
+        if (Test-Path $codexReviewSource) {
+            $dest = "$skillsDir\codex-review"
             if (Test-Path $dest) {
                 Remove-Item -Recurse -Force $dest
             }
-            Copy-Item -Recurse $ccgWorkflowSource $dest
-            Write-Success "Installed ccg-workflow skill"
+            Copy-Item -Recurse $codexReviewSource $dest
+            Write-Success "Installed codex-review skill"
         } else {
-            Write-WarningMsg "ccg-workflow skill not found, skipping"
+            Write-WarningMsg "codex-review skill not found, skipping"
         }
 
-        # Copy gemini-collaboration skill
-        if (Test-Path $geminiCollabSource) {
-            $dest = "$skillsDir\gemini-collaboration"
-            if (Test-Path $dest) {
-                Remove-Item -Recurse -Force $dest
+        # Remove skills from the old 4-model layout if present
+        foreach ($oldSkill in @("ccg-workflow", "gemini-collaboration")) {
+            $oldPath = "$skillsDir\$oldSkill"
+            if (Test-Path $oldPath) {
+                Remove-Item -Recurse -Force $oldPath
+                Write-Success "Removed legacy $oldSkill skill"
             }
-            Copy-Item -Recurse $geminiCollabSource $dest
-            Write-Success "Installed gemini-collaboration skill"
-        } else {
-            Write-WarningMsg "gemini-collaboration skill not found, skipping"
         }
     } catch {
-        Write-ErrorMsg "Failed to install skills"
+        Write-ErrorMsg "Failed to install skill"
         exit 1
     }
 }
@@ -286,57 +287,54 @@ if ($DryRun) {
 Write-Step "Step 5: Configuring global CLAUDE.md..."
 
 $claudeMdPath = "$env:USERPROFILE\.claude\CLAUDE.md"
-$ccgMarker = "# CCG Configuration"
+$ccMarker = "# CC Configuration"
 
-# Read CCG config from external file to avoid encoding issues
-$ccgConfigPath = Join-Path $PSScriptRoot "templates\ccg-global-prompt.md"
+# Read CC config from external file to avoid encoding issues
+$ccConfigPath = Join-Path $PSScriptRoot "templates\cc-global-prompt.md"
 
 if ($DryRun) {
     if (!(Test-Path $claudeMdPath)) {
-        if (Test-Path $ccgConfigPath) {
+        if (Test-Path $ccConfigPath) {
             Write-DryRun "Would create: $claudeMdPath (from template)"
             Write-Success "Global CLAUDE.md would be created"
         } else {
-            Write-WarningMsg "CCG global prompt template not found at $ccgConfigPath"
+            Write-WarningMsg "CC global prompt template not found at $ccConfigPath"
         }
     } else {
         $content = Get-Content $claudeMdPath -Raw -Encoding UTF8
-        if ($content -match [regex]::Escape($ccgMarker)) {
-            Write-WarningMsg "CCG configuration already exists in CLAUDE.md, would skip"
+        if ($content -match [regex]::Escape($ccMarker)) {
+            Write-WarningMsg "CC configuration already exists in CLAUDE.md, would skip"
         } else {
-            if (Test-Path $ccgConfigPath) {
-                Write-DryRun "Would append CCG configuration to: $claudeMdPath"
-                Write-Success "CCG configuration would be appended to CLAUDE.md"
+            if (Test-Path $ccConfigPath) {
+                Write-DryRun "Would append CC configuration to: $claudeMdPath"
+                Write-Success "CC configuration would be appended to CLAUDE.md"
             } else {
-                Write-WarningMsg "CCG global prompt template not found at $ccgConfigPath"
+                Write-WarningMsg "CC global prompt template not found at $ccConfigPath"
             }
         }
     }
 } else {
     try {
         if (!(Test-Path $claudeMdPath)) {
-            # Create new file with CCG config
-            if (Test-Path $ccgConfigPath) {
-                Copy-Item $ccgConfigPath $claudeMdPath
+            if (Test-Path $ccConfigPath) {
+                Copy-Item $ccConfigPath $claudeMdPath
                 Write-Success "Created global CLAUDE.md"
             } else {
-                Write-WarningMsg "CCG global prompt template not found at $ccgConfigPath"
-                Write-WarningMsg "Please manually copy the CCG configuration to $claudeMdPath"
+                Write-WarningMsg "CC global prompt template not found at $ccConfigPath"
+                Write-WarningMsg "Please manually copy the CC configuration to $claudeMdPath"
             }
         } else {
-            # Check if CCG config already exists
             $content = Get-Content $claudeMdPath -Raw -Encoding UTF8
-            if ($content -match [regex]::Escape($ccgMarker)) {
-                Write-WarningMsg "CCG configuration already exists in CLAUDE.md, skipping"
+            if ($content -match [regex]::Escape($ccMarker)) {
+                Write-WarningMsg "CC configuration already exists in CLAUDE.md, skipping"
             } else {
-                # Append CCG config
-                if (Test-Path $ccgConfigPath) {
-                    $ccgContent = Get-Content $ccgConfigPath -Raw -Encoding UTF8
-                    Add-Content -Path $claudeMdPath -Value "`n$ccgContent" -Encoding UTF8
-                    Write-Success "Appended CCG configuration to CLAUDE.md"
+                if (Test-Path $ccConfigPath) {
+                    $ccContent = Get-Content $ccConfigPath -Raw -Encoding UTF8
+                    Add-Content -Path $claudeMdPath -Value "`n$ccContent" -Encoding UTF8
+                    Write-Success "Appended CC configuration to CLAUDE.md"
                 } else {
-                    Write-WarningMsg "CCG global prompt template not found at $ccgConfigPath"
-                    Write-WarningMsg "Please manually copy the CCG configuration to $claudeMdPath"
+                    Write-WarningMsg "CC global prompt template not found at $ccConfigPath"
+                    Write-WarningMsg "Please manually copy the CC configuration to $claudeMdPath"
                 }
             }
         }
@@ -346,101 +344,6 @@ if ($DryRun) {
     }
 }
 
-# ==============================================================================
-# Step 6: Configure Coder
-# ==============================================================================
-Write-Step "Step 6: Configuring Coder..."
-
-$configDir = "$env:USERPROFILE\.ccg-mcp"
-$configPath = "$configDir\config.toml"
-
-if ($DryRun) {
-    if (!(Test-Path $configDir)) {
-        Write-DryRun "Would create directory: $configDir"
-    }
-    if (Test-Path $configPath) {
-        Write-WarningMsg "Config file already exists at $configPath"
-        Write-DryRun "Would prompt: Overwrite? (y/N)"
-    }
-    Write-DryRun "Would prompt for: API Token, Base URL, Model"
-    Write-DryRun "Would create config file: $configPath"
-    Write-DryRun "Would set file permissions (current user only)"
-    Write-Success "Coder configuration would be saved"
-} else {
-    $skipCoderConfig = $false
-
-    try {
-        # Create config directory if it doesn't exist
-        if (!(Test-Path $configDir)) {
-            New-Item -ItemType Directory -Path $configDir -Force | Out-Null
-        }
-
-        # Check if config already exists
-        if (Test-Path $configPath) {
-            Write-WarningMsg "Config file already exists at $configPath"
-            $overwrite = Read-Host "Overwrite? (y/N)"
-            if ($overwrite -ne "y" -and $overwrite -ne "Y") {
-                Write-WarningMsg "Skipping Coder configuration"
-                $skipCoderConfig = $true
-            }
-        }
-
-        if (-not $skipCoderConfig) {
-            # Prompt for API Token
-            $apiToken = Read-Host "Enter your API Token"
-            if ([string]::IsNullOrWhiteSpace($apiToken)) {
-                Write-ErrorMsg "API Token is required"
-                exit 1
-            }
-
-            # Prompt for Base URL (optional)
-            $baseUrl = Read-Host "Enter Base URL (default: https://open.bigmodel.cn/api/anthropic)"
-            if ([string]::IsNullOrWhiteSpace($baseUrl)) {
-                $baseUrl = "https://open.bigmodel.cn/api/anthropic"
-            }
-
-            # Prompt for Model (required)
-            $model = Read-Host "Enter Model (e.g. glm-4.7)"
-            if ([string]::IsNullOrWhiteSpace($model)) {
-                Write-ErrorMsg "Model is required"
-                exit 1
-            }
-
-            # Escape special characters for TOML string values (backslash and double quote)
-            $safeApiToken = $apiToken -replace '\\', '\\' -replace '"', '\"'
-            $safeBaseUrl = $baseUrl -replace '\\', '\\' -replace '"', '\"'
-            $safeModel = $model -replace '\\', '\\' -replace '"', '\"'
-
-            # Generate config.toml
-            $configContent = @"
-[coder]
-api_token = "$safeApiToken"
-base_url = "$safeBaseUrl"
-model = "$safeModel"
-
-[coder.env]
-CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1"
-"@
-
-            # Use UTF8 without BOM - critical for TOML parsers
-            # PowerShell 5.x's "Set-Content -Encoding UTF8" writes BOM (EF BB BF) which breaks TOML parsing
-            [System.IO.File]::WriteAllText($configPath, $configContent, [System.Text.UTF8Encoding]::new($false))
-
-            # Set file permissions - only current user can read/write
-            $acl = Get-Acl $configPath
-            $acl.SetAccessRuleProtection($true, $false)
-            $rule = New-Object System.Security.AccessControl.FileSystemAccessRule($env:USERNAME, "FullControl", "Allow")
-            $acl.SetAccessRule($rule)
-            Set-Acl $configPath $acl
-
-            Write-Success "Coder configuration saved to $configPath"
-        }
-
-    } catch {
-        Write-ErrorMsg "Failed to configure Coder: $_"
-        exit 1
-    }
-}
 # ==============================================================================
 # Done!
 # ==============================================================================
@@ -452,12 +355,16 @@ if ($DryRun) {
     Write-Host "  .\setup.ps1" -ForegroundColor White
 } else {
     Write-Host "`n============================================================" -ForegroundColor Green
-    Write-Success "CCG setup completed successfully!"
+    Write-Success "CC setup completed successfully!"
     Write-Host "============================================================`n" -ForegroundColor Green
 
+    Write-Host "Codex uses its own CLI auth (codex login / OPENAI_API_KEY / ~/.codex/config.toml)." -ForegroundColor Cyan
+    Write-Host "No local config file is needed." -ForegroundColor Cyan
+    Write-Host ""
     Write-Host "Next steps:" -ForegroundColor Cyan
-    Write-Host "  1. Restart Claude Code CLI" -ForegroundColor White
-    Write-Host "  2. Verify MCP server: claude mcp list" -ForegroundColor White
-    Write-Host "  3. Check available skills: /ccg-workflow" -ForegroundColor White
+    Write-Host "  1. Make sure Codex is logged in: codex login" -ForegroundColor White
+    Write-Host "  2. Restart Claude Code CLI" -ForegroundColor White
+    Write-Host "  3. Verify MCP server: claude mcp list" -ForegroundColor White
+    Write-Host "  4. Check the skill: /codex-review" -ForegroundColor White
 }
 Write-Host ""

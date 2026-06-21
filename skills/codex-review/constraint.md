@@ -3,10 +3,10 @@
 ---
 
 ## Communication
-* 优先使用 ccg-workflow 工具进行协作与任务流转
+* 完成可独立验证的改动后，按 codex-review 流程送 Codex 终审
 * 所有关键操作必须具备可追溯记录（SESSION_ID / 变更记录）
 ### Failover（必须具备）
-当 ccg-workflow 不可用：
+当 Codex 审查工具不可用：
 * 使用 Git + Markdown 记录过程
 * 在 docs/ 或 discuss/ 中补充记录
 * 后续补同步

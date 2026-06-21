@@ -40,7 +40,6 @@ docs/
 reference/
 
 # Secrets
-config.toml
 *.env
 
 # uv
