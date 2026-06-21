@@ -26,6 +26,7 @@ from cc_mcp.tools.errors import (
 )
 from cc_mcp.tools.metrics import MetricsCollector
 from cc_mcp.tools.process import safe_codex_command
+from cc_mcp.tools.results import build_failure_result, build_success_result
 
 
 # ============================================================================
@@ -336,13 +337,11 @@ async def codex_tool(
 
     # 构建返回结果
     if success:
-        result = {
-            "success": True,
-            "tool": "codex",
-            "SESSION_ID": thread_id,
-            "result": agent_messages,
-            "duration": metrics.format_duration(),
-        }
+        result = build_success_result(
+            thread_id=thread_id,
+            agent_messages=agent_messages,
+            duration=metrics.format_duration(),
+        )
     else:
         # 使用最后一次失败的错误信息
         if last_error:
@@ -351,34 +350,17 @@ async def codex_tool(
             exit_code = last_error["exit_code"]
             json_decode_errors = last_error["json_decode_errors"]
 
-        # 如果是认证错误，添加友好提示
-        final_error = err_message
-        if error_kind == ErrorKind.AUTH_REQUIRED:
-            final_error = (
-                "请先登录 Codex CLI。运行以下命令完成认证：\n"
-                "  codex login\n"
-                "\n"
-                "或使用 API Key 认证：\n"
-                "  printenv OPENAI_API_KEY | codex login --with-api-key\n"
-                "\n" + err_message
-            )
-
-        result = {
-            "success": False,
-            "tool": "codex",
-            "error": final_error,
-            "error_kind": error_kind,
-            "error_detail": _build_error_detail(
-                message=err_message.split('\n')[0] if err_message else "未知错误",
-                exit_code=exit_code,
-                last_lines=all_last_lines,
-                json_decode_errors=json_decode_errors,
-                idle_timeout_s=timeout if error_kind == ErrorKind.IDLE_TIMEOUT else None,
-                max_duration_s=max_duration if error_kind == ErrorKind.TIMEOUT else None,
-                retries=retries,
-            ),
-            "duration": metrics.format_duration(),
-        }
+        result = build_failure_result(
+            error_kind=error_kind,
+            err_message=err_message,
+            duration=metrics.format_duration(),
+            exit_code=exit_code,
+            json_decode_errors=json_decode_errors,
+            all_last_lines=all_last_lines,
+            idle_timeout_s=timeout if error_kind == ErrorKind.IDLE_TIMEOUT else None,
+            max_duration_s=max_duration if error_kind == ErrorKind.TIMEOUT else None,
+            retries=retries,
+        )
 
     if return_all_messages:
         result["all_messages"] = all_messages

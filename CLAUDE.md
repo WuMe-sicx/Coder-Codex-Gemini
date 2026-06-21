@@ -20,6 +20,10 @@ uv run cc-mcp
 # Import sanity check
 uv run python -c "import cc_mcp.server"
 
+# Run unit tests (stdlib unittest, no extra deps)
+uv run python -m unittest discover -s tests
+# single test: uv run python -m unittest tests.test_units.TestResults
+
 # Register with Claude Code (local dev)
 claude mcp add cc -s user --transport stdio -- uvx --from "file:$(pwd)" cc-mcp
 
@@ -34,7 +38,7 @@ uv build
 ./uninstall.sh
 ```
 
-No test suite or linter is configured. Codex authenticates through its own CLI (`codex login` / `OPENAI_API_KEY` / `~/.codex/config.toml`); this server stores **no** config of its own.
+Unit tests live in `tests/` (stdlib `unittest`, no extra deps) and cover the pure helpers in `errors`/`metrics`/`results`/`process`. No linter is configured. Codex authenticates through its own CLI (`codex login` / `OPENAI_API_KEY` / `~/.codex/config.toml`); this server stores **no** config of its own.
 
 ## Architecture
 
@@ -50,6 +54,7 @@ No test suite or linter is configured. Codex authenticates through its own CLI (
 - `tools/process.py` — `safe_codex_command()` context manager, process-group helpers, dual-timeout streaming.
 - `tools/errors.py` — exceptions, `ErrorKind`, `_build_error_detail`, auth/retry/reconnect predicates.
 - `tools/metrics.py` — `MetricsCollector`.
+- `tools/results.py` — pure builders for the success / failure result dicts.
 
 | Tool | CLI invoked | Default sandbox | Default retries | Side effects |
 |------|-------------|-----------------|-----------------|--------------|
@@ -84,7 +89,7 @@ The review ends with exactly one verdict line: `✅ PASS` / `⚠️ OPTIMIZE` / 
 
 ## Code conventions
 
-- Python 3.12+ with type hints; async tool handler in `server.py`, sync internals split across `tools/{codex,process,errors,metrics}.py` (one concern per file, ≤300 lines).
+- Python 3.12+ with type hints; async tool handler in `server.py`, sync internals split across `tools/{codex,process,errors,metrics,results}.py` (one concern per file, ≤300 lines; `codex.py` at ~370 is the documented exception — one cohesive orchestration function plus its MCP schema).
 - Tool params use `Annotated[type, Field(...)]` for MCP schema generation.
 - Chinese comments and docstrings throughout.
 - Error handling uses `CommandTimeoutError` / `CommandNotFoundError` and the `ErrorKind` string constants — never swallow exceptions silently.
