@@ -84,12 +84,13 @@ fi
 if [ "$MCP_REGISTERED" = true ]; then
     write_warning "MCP server 'cc' is already registered, skipping"
 else
-    if claude mcp add cc -s user --transport stdio -- uvx --from "file:$SCRIPT_DIR" cc-mcp; then
-        write_success "MCP server registered"
+    # 本地源码直跑：不联网、不打包，改完即生效（首次自动 uv sync）
+    if claude mcp add cc -s user --transport stdio -- uv run --directory "$SCRIPT_DIR" cc-mcp; then
+        write_success "MCP server registered (local: uv run --directory)"
     else
         write_error "Failed to register MCP server"
         echo "You can register manually:"
-        echo "  claude mcp add cc -s user --transport stdio -- uvx --from \"file:$SCRIPT_DIR\" cc-mcp"
+        echo "  claude mcp add cc -s user --transport stdio -- uv run --directory \"$SCRIPT_DIR\" cc-mcp"
         exit 1
     fi
 fi

@@ -24,10 +24,10 @@ uv run python -c "import cc_mcp.server"
 uv run python -m unittest discover -s tests
 # single test: uv run python -m unittest tests.test_units.TestResults
 
-# Register with Claude Code (local dev)
-claude mcp add cc -s user --transport stdio -- uvx --from "file:$(pwd)" cc-mcp
+# Register with Claude Code (local checkout — preferred: runs local source, no network/rebuild)
+claude mcp add cc -s user --transport stdio -- uv run --directory $(pwd) cc-mcp
 
-# Register with Claude Code (remote/production)
+# Register with Claude Code (no local checkout — fetches from git on demand)
 claude mcp add cc -s user --transport stdio -- uvx --refresh --from git+https://github.com/WuMe-sicx/Coder-Codex-Gemini.git cc-mcp
 
 # Build distribution

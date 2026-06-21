@@ -188,26 +188,26 @@ Write-Step "Step 3: Generating MCP server configuration..."
 
 $projectDir = $PSScriptRoot
 
-# Detect uvx path
-$uvxPath = $null
+# Detect uv path
+$uvPath = $null
 try {
-    $uvxPath = (Get-Command uvx -ErrorAction Stop).Source
+    $uvPath = (Get-Command uv -ErrorAction Stop).Source
 } catch {
     Refresh-PathFromRegistry
     try {
-        $uvxPath = (Get-Command uvx -ErrorAction Stop).Source
+        $uvPath = (Get-Command uv -ErrorAction Stop).Source
     } catch {}
 }
 
-if (-not $uvxPath) {
-    Write-WarningMsg "uvx not found in PATH, using 'uvx' as command"
-    $uvxPath = "uvx"
+if (-not $uvPath) {
+    Write-WarningMsg "uv not found in PATH, using 'uv' as command"
+    $uvPath = "uv"
 }
 
-# Build MCP config JSON
+# Build MCP config JSON — 本地源码直跑（uv run --directory）：不联网、不打包，改完即生效
 $mcpConfig = [PSCustomObject]@{
-    args = @("--from", "file:$projectDir", "cc-mcp")
-    command = $uvxPath
+    args = @("run", "--directory", $projectDir, "cc-mcp")
+    command = $uvPath
     cwd = $projectDir
     type = "stdio"
 }

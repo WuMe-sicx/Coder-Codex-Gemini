@@ -66,11 +66,18 @@ setup 会：安装依赖 → 注册 MCP 服务器（名为 `cc`）→ 安装 `cc
 
 ### 手动注册
 
-```bash
-# 本地开发
-claude mcp add cc -s user --transport stdio -- uvx --from "file:$(pwd)" cc-mcp
+**已克隆本仓库（推荐）** —— 直接跑本地源码，**不联网、不打包、改完即生效**：
 
-# 远程/生产
+```bash
+claude mcp add cc -s user --transport stdio -- \
+  uv run --directory /绝对路径/Coder-Codex-Gemini cc-mcp
+```
+
+> `uv run --directory` 在本地项目环境里运行，首次会自动 `uv sync`；之后 `git pull` 或改代码都无需重装。
+
+**没有本地克隆时**（才需要走 git，会按需拉取）：
+
+```bash
 claude mcp add cc -s user --transport stdio -- uvx --refresh \
   --from git+https://github.com/WuMe-sicx/Coder-Codex-Gemini.git cc-mcp
 ```
