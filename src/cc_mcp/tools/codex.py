@@ -138,8 +138,9 @@ def codex_tool(
         cmd = ["codex", "exec", "resume", "--json"]
         if skip_git_repo_check:
             cmd.append("--skip-git-repo-check")
-        if image_list:
-            cmd.extend(["--image", ",".join(str(p) for p in image_list)])
+        for img in image_list:
+            # codex --image 为多值选项，需重复传递而非逗号拼接
+            cmd.extend(["--image", str(img)])
         if model:
             cmd.extend(["--model", model])
         # SESSION_ID 为位置参数；`-` 表示 PROMPT 从 stdin 读取
@@ -149,8 +150,9 @@ def codex_tool(
         cmd = ["codex", "exec", "--sandbox", sandbox, "--cd", str(cd), "--json"]
         if skip_git_repo_check:
             cmd.append("--skip-git-repo-check")
-        if image_list:
-            cmd.extend(["--image", ",".join(str(p) for p in image_list)])
+        for img in image_list:
+            # codex --image 为多值选项，需重复传递而非逗号拼接
+            cmd.extend(["--image", str(img)])
         if model:
             cmd.extend(["--model", model])
         if profile:

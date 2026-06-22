@@ -66,11 +66,18 @@ Setup will: install deps → register the MCP server (named `cc`) → install th
 
 ### Manual registration
 
-```bash
-# Local dev
-claude mcp add cc -s user --transport stdio -- uvx --from "file:$(pwd)" cc-mcp
+**You cloned this repo (recommended)** — runs the local source directly: no network, no rebuild, edits take effect immediately:
 
-# Remote / production
+```bash
+claude mcp add cc -s user --transport stdio -- \
+  uv run --directory /abs/path/Coder-Codex-Gemini cc-mcp
+```
+
+> `uv run --directory` runs inside the local project env (auto `uv sync` on first run); no reinstall after `git pull` or code edits.
+
+**No local checkout** (only then go through git, fetched on demand):
+
+```bash
 claude mcp add cc -s user --transport stdio -- uvx --refresh \
   --from git+https://github.com/WuMe-sicx/Coder-Codex-Gemini.git cc-mcp
 ```
