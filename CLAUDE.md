@@ -51,6 +51,7 @@ Unit tests live in `tests/` (stdlib `unittest`, no extra deps) and cover the pur
 `server.py` registers a single async tool, `codex`, which delegates to `tools/codex.py:codex_tool()`. The tool layer is split into focused modules (each ≤300 lines):
 
 - `tools/codex.py` — `CODEX_SYSTEM_PROMPT` + the `codex_tool()` orchestration loop (build command → stream → parse → retry → assemble result).
+- `tools/command.py` — `build_codex_cmd()`: pure builder of the `codex exec` argv (new vs `resume` subcommand). Unit-tested; this is where the resume bug lived.
 - `tools/process.py` — `safe_codex_command()` context manager, process-group helpers, dual-timeout streaming.
 - `tools/errors.py` — exceptions, `ErrorKind`, `_build_error_detail`, auth/retry/reconnect predicates.
 - `tools/metrics.py` — `MetricsCollector`.
@@ -89,7 +90,7 @@ The review ends with exactly one verdict line: `✅ PASS` / `⚠️ OPTIMIZE` / 
 
 ## Code conventions
 
-- Python 3.12+ with type hints; async tool handler in `server.py`, sync internals split across `tools/{codex,process,errors,metrics,results}.py` (one concern per file, ≤300 lines; `codex.py` at ~370 is the documented exception — one cohesive orchestration function plus its MCP schema).
+- Python 3.12+ with type hints; async tool handler in `server.py`, sync internals split across `tools/{codex,command,process,errors,metrics,results}.py` (one concern per file, ≤300 lines; `codex.py` at ~370 is the documented exception — one cohesive orchestration function plus its MCP schema).
 - Tool params use `Annotated[type, Field(...)]` for MCP schema generation.
 - Chinese comments and docstrings throughout.
 - Error handling uses `CommandTimeoutError` / `CommandNotFoundError` and the `ErrorKind` string constants — never swallow exceptions silently.

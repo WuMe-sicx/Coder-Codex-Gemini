@@ -16,6 +16,7 @@ from typing import Annotated, Any, Dict, List, Literal, Optional
 from pydantic import Field
 
 from cc_mcp.config import build_codex_env
+from cc_mcp.tools.command import build_codex_cmd
 from cc_mcp.tools.errors import (
     CommandNotFoundError,
     CommandTimeoutError,
@@ -122,44 +123,17 @@ def codex_tool(
     # 初始化指标收集器
     metrics = MetricsCollector(tool="codex", prompt=PROMPT, sandbox=sandbox)
 
-    # 归一化可选参数
-    image_list = image or []
-
-    # 构建命令（shell=False 时不需要转义）
-    #
-    # 关键：`resume` 是 `codex exec` 的子命令，选项集与 exec 不同——
-    #   - resume 不支持 --sandbox / --cd / --profile（沿用原会话的设置）
-    #   - resume 的选项必须放在 `resume` 子命令之后，而非之前
-    #   - resume 的 PROMPT 需用 `-` 显式声明从 stdin 读取
-    # 误把 exec 级 flag（尤其 --json）放在 resume 之前会导致 resume 不输出 JSONL，
-    # 解析不到 thread_id / agent_message，复审上下文续接形同失效。
-    if SESSION_ID:
-        # 续接已有会话，保留初审上下文；工作目录由 Popen(cwd=cd) 保证
-        cmd = ["codex", "exec", "resume", "--json"]
-        if skip_git_repo_check:
-            cmd.append("--skip-git-repo-check")
-        for img in image_list:
-            # codex --image 为多值选项，需重复传递而非逗号拼接
-            cmd.extend(["--image", str(img)])
-        if model:
-            cmd.extend(["--model", model])
-        # SESSION_ID 为位置参数；`-` 表示 PROMPT 从 stdin 读取
-        cmd.extend([str(SESSION_ID), "-"])
-    else:
-        # 新会话
-        cmd = ["codex", "exec", "--sandbox", sandbox, "--cd", str(cd), "--json"]
-        if skip_git_repo_check:
-            cmd.append("--skip-git-repo-check")
-        for img in image_list:
-            # codex --image 为多值选项，需重复传递而非逗号拼接
-            cmd.extend(["--image", str(img)])
-        if model:
-            cmd.extend(["--model", model])
-        if profile:
-            cmd.extend(["--profile", profile])
-        if yolo:
-            # codex 无 --yolo；正确 flag 是 --dangerously-bypass-approvals-and-sandbox
-            cmd.append("--dangerously-bypass-approvals-and-sandbox")
+    # 构建命令（new vs resume 的差异与原因见 command.build_codex_cmd）
+    cmd = build_codex_cmd(
+        sandbox=sandbox,
+        cd=cd,
+        skip_git_repo_check=skip_git_repo_check,
+        image_list=image or [],
+        model=model,
+        profile=profile,
+        yolo=yolo,
+        session_id=SESSION_ID,
+    )
 
     # PROMPT 通过 stdin 传递，不再作为命令行参数
 

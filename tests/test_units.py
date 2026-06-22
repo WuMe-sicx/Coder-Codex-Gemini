@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
 
 from cc_mcp.tools.errors import (
     ErrorKind,
@@ -16,6 +17,7 @@ from cc_mcp.tools.errors import (
     _is_retryable_error,
     is_reconnecting_message,
 )
+from cc_mcp.tools.command import build_codex_cmd
 from cc_mcp.tools.metrics import MetricsCollector
 from cc_mcp.tools.process import _is_turn_completed
 from cc_mcp.tools.results import build_failure_result, build_success_result
@@ -53,6 +55,50 @@ class TestErrors(unittest.TestCase):
     def test_filter_last_lines_caps_count(self):
         lines = [f'{{"n": {i}}}' for i in range(120)]
         self.assertEqual(len(_filter_last_lines(lines, max_lines=50)), 50)
+
+
+class TestBuildCmd(unittest.TestCase):
+    """命令构造——resume 子命令曾在此出 bug，重点守护"""
+
+    def test_new_session(self):
+        cmd = build_codex_cmd(sandbox="read-only", cd=Path("/repo"))
+        self.assertEqual(cmd[:3], ["codex", "exec", "--sandbox"])
+        self.assertIn("--json", cmd)
+        self.assertIn("--cd", cmd)
+        self.assertNotIn("resume", cmd)
+
+    def test_resume_structure(self):
+        cmd = build_codex_cmd(sandbox="read-only", cd=Path("/repo"), session_id="sid-1")
+        # resume 子命令在前，--json 紧随其后（否则 resume 不输出 JSONL）
+        self.assertEqual(cmd[:4], ["codex", "exec", "resume", "--json"])
+        # SESSION_ID 与 `-`（从 stdin 读 PROMPT）在末尾
+        self.assertEqual(cmd[-2:], ["sid-1", "-"])
+        # resume 不支持的选项不得出现
+        for forbidden in ("--sandbox", "--cd", "--profile"):
+            self.assertNotIn(forbidden, cmd)
+
+    def test_image_repeated_not_comma(self):
+        cmd = build_codex_cmd(
+            sandbox="read-only", cd=Path("/repo"),
+            image_list=[Path("a.png"), Path("b.png")],
+        )
+        self.assertEqual(cmd.count("--image"), 2)
+        self.assertIn("a.png", cmd)
+        self.assertNotIn("a.png,b.png", cmd)
+
+    def test_yolo_only_new_and_correct_flag(self):
+        new = build_codex_cmd(sandbox="read-only", cd=Path("/repo"), yolo=True)
+        self.assertIn("--dangerously-bypass-approvals-and-sandbox", new)
+        self.assertNotIn("--yolo", new)
+        # resume 路径不带 sandbox 类危险 flag
+        res = build_codex_cmd(sandbox="read-only", cd=Path("/repo"), yolo=True, session_id="s")
+        self.assertNotIn("--dangerously-bypass-approvals-and-sandbox", res)
+
+    def test_model_in_both_paths(self):
+        new = build_codex_cmd(sandbox="read-only", cd=Path("/r"), model="o3")
+        res = build_codex_cmd(sandbox="read-only", cd=Path("/r"), model="o3", session_id="s")
+        self.assertIn("o3", new)
+        self.assertIn("o3", res)
 
 
 class TestProcess(unittest.TestCase):
