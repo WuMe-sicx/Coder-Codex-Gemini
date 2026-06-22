@@ -60,58 +60,28 @@
 | `subprocess_error` | 进程退出码非零 |
 | `unexpected_exception` | 未预期异常 |
 
-## 审核最佳实践
+## 送审 PROMPT 模板（唯一）
 
-调用 Codex 审核前，Claude 应先获取 git diff 并附在 PROMPT 中，让 Codex 精准审核变更而非自行探索文件：
+调用前先取 diff 并嵌入 PROMPT，让 Codex 精准审变更而非自行探索文件（省 token、更准）：
 
 ```bash
-# Claude 在调用 Codex 前执行
-git diff --no-color
+git diff --no-color   # Claude 在调用 Codex 前执行
 ```
 
-将 diff 输出直接嵌入 Codex 的 PROMPT，格式：
+唯一模板（检查项不必重列——`codex` 工具已内置等价英文 system prompt：逻辑正确性 / 边界条件 / 安全风险 / 测试缺口 / 可维护性，并要求以 ✅ PASS / ⚠️ OPTIMIZE / ❌ CHANGE 结尾。PROMPT 只需补本次重点）：
 
 ````
-请 review 以下代码改动：
+请 review 以下代码改动（只审不改）：
 
 **改动文件**：[文件列表]
 **改动目的**：[简要描述]
+**本次重点**：[如：鉴权边界 / 并发竞态 / 是否引入回归 —— 没有可省略]
 
 **Git Diff**:
 ```diff
-[粘贴 git diff 输出]
+[粘贴 git diff --no-color 输出]
 ```
-
-**请检查**：
-1. 代码质量和规范
-2. 潜在 Bug
-3. 需求完成度
-4. 安全问题
-5. 最佳实践
 ````
-
-这样 Codex 无需自行读取文件，节省 token 并提高审核精准度。
-
-## Prompt 模板
-
-```
-请 review 以下代码改动：
-
-**改动文件**：[文件列表]
-**改动目的**：[简要描述]
-
-**请检查**：
-1. 代码质量（可读性、可维护性）
-2. 潜在 Bug 或边界情况
-3. 需求完成度
-4. 安全问题
-5. 最佳实践
-
-**请给出明确结论**：
-- ✅ 通过：代码质量良好，可以合入
-- ⚠️ 建议优化：[具体建议]
-- ❌ 需要修改：[具体问题]
-```
 
 ## 使用规范
 
