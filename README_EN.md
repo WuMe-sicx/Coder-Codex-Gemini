@@ -117,19 +117,11 @@ Claude breaks down the requirement
 - Fix **item by item** per Codex's list; touch only the relevant code, don't refactor unrelated parts along the way.
 - **At most 2 round-trips** per issue; if still stuck, stop and escalate the disagreement to a human — no infinite loops.
 
-### Review instruction template
+### Review instruction
 
-> Do an independent code review only. **Do not modify code.** Check each item and report `problem / location / severity / suggestion`:
->
-> 1. **Correctness**: does it implement the requirement; any logic flaws.
-> 2. **Boundary conditions**: null/empty, out-of-range, invalid input, concurrency races.
-> 3. **Security**: injection, broken authz, secret leakage, unsafe dependencies.
-> 4. **Test gaps**: are critical paths and edges covered; are assertions meaningful.
-> 5. **Maintainability / performance**: obvious problems only (optional).
->
-> If there are no issues, explicitly reply "pass".
+The `codex` tool ships an equivalent built-in system prompt (checklist: **Correctness / Boundary conditions / Security / Test gaps / Maintainability**, ending with `✅ PASS / ⚠️ OPTIMIZE / ❌ CHANGE`). **You don't need to restate the checklist** in the PROMPT — just embed `git diff --no-color` plus "changed files / purpose / focus of this review" so Codex reviews the actual change precisely, saving tokens and improving accuracy.
 
-> Before calling, embed `git diff --no-color` in the PROMPT so Codex reviews the actual change precisely — saves tokens and improves accuracy.
+> Single send-for-review template: see [`skills/cc-review/codex-guide.md`](skills/cc-review/codex-guide.md).
 
 ---
 
